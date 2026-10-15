@@ -1,0 +1,108 @@
+:root {
+  color-scheme: dark;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #eee9dd;
+  background: #11110f;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+html, body, main { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { overscroll-behavior: none; }
+button { font: inherit; -webkit-tap-highlight-color: transparent; }
+#scene { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+#scene:active { cursor: grabbing; }
+.environment-label {
+  position: fixed;
+  top: max(28px, env(safe-area-inset-top));
+  left: max(30px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  pointer-events: none;
+  text-shadow: 0 1px 12px #0008;
+}
+.environment-name { font-size: 10px; font-weight: 500; letter-spacing: 3px; color: #f2eddfb5; }
+.environment-subtitle { font-size: 10px; font-weight: 400; letter-spacing: .65px; color: #e9e2d078; }
+.controls-hint {
+  position: fixed;
+  left: max(30px, env(safe-area-inset-left));
+  bottom: max(28px, env(safe-area-inset-bottom));
+  pointer-events: none;
+  font-size: 10px;
+  letter-spacing: .45px;
+  color: #e9e2d08c;
+  text-shadow: 0 1px 12px #000a;
+}
+.separator { padding: 0 8px; opacity: .6; }
+.touch-hint { display: none; }
+.view-actions {
+  position: fixed;
+  right: max(25px, env(safe-area-inset-right));
+  bottom: max(19px, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.view-actions button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+  color: #eee6d799;
+  background: #17181312;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color .2s, background .2s, border-color .2s;
+}
+.view-actions button:hover { color: #fff9ec; background: #1b1b1799; border-color: #f5ebd722; }
+.view-actions button:focus-visible, .touch-movement button:focus-visible { outline: 1px solid #e6d9bd; outline-offset: 3px; }
+.view-actions svg { width: 20px; height: 20px; }
+#crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #fff9e66b;
+  box-shadow: 0 0 2px #0008;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s;
+}
+.exploring #crosshair { opacity: 1; }
+#loading, #errorPanel {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  z-index: 5;
+  background: #11110f;
+  transition: opacity .65s ease, visibility .65s;
+}
+.loading-content, .error-content { width: min(260px, 100%); }
+.loading-caption { font-size: 10px; letter-spacing: 4px; color: #e8deca99; }
+#loadingText, #errorText { margin: 17px 0 22px; font-size: 12px; line-height: 1.7; font-weight: 400; color: #e0d9ca80; }
+.loading-track { height: 1px; width: 100%; overflow: hidden; background: #e0d9ca16; }
+#loadingProgress { width: 0; height: 100%; background: #d8c9aa9c; transition: width .3s ease; }
+.hidden { visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }
+.error-content button { padding: 9px 13px; border: 1px solid #e0d9ca35; border-radius: 2px; background: transparent; color: #e0d9ca; font-size: 11px; cursor: pointer; }
+.touch-movement { display: none; }
+@media (pointer: coarse) {
+  .environment-label { top: max(22px, env(safe-area-inset-top)); left: max(22px, env(safe-area-inset-left)); }
+  .desktop-hint { display: none; }
+  .touch-hint { display: inline; }
+  .controls-hint { left: auto; right: max(25px, env(safe-area-inset-right)); bottom: max(67px, env(safe-area-inset-bottom)); font-size: 9px; }
+  .touch-movement { position: fixed; bottom: max(22px, env(safe-area-inset-bottom)); left: max(22px, env(safe-area-inset-left)); display: grid; grid-template-columns: repeat(3, 37px); grid-template-rows: repeat(2, 37px); gap: 4px; }
+  .touch-movement button { border: 1px solid #e8dfcb20; border-radius: 4px; background: #17181357; color: #eee5d28c; font-size: 18px; touch-action: none; user-select: none; }
+  .touch-movement button:active { color: #fff8e9; background: #e8dfcb26; }
+  .move-forward { grid-column: 2; grid-row: 1; }
+  .move-left { grid-column: 1; grid-row: 2; }
+  .move-back { grid-column: 2; grid-row: 2; }
+  .move-right { grid-column: 3; grid-row: 2; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; } }

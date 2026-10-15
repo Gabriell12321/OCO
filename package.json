@@ -1,0 +1,8 @@
+{
+  "name": "quarto-01",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Um único quarto 3D com materiais e iluminação realistas",
+  "scripts": { "start": "node serve.cjs" }
+}

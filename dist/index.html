@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#11110f" />
+    <title>Quarto 01 — Estudo de ambiente</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+    </script>
+  </head>
+  <body>
+    <main aria-label="Quarto em 3D">
+      <canvas id="scene" aria-label="Ambiente de um quarto realista em primeira pessoa. Arraste para olhar e use WASD ou as setas para caminhar." tabindex="0"></canvas>
+      <header class="environment-label" aria-label="Estudo de ambiente">
+        <span class="environment-name">QUARTO 01</span>
+        <span class="environment-subtitle">Estudo de ambiente</span>
+      </header>
+      <div id="crosshair" aria-hidden="true"></div>
+      <div class="controls-hint" aria-hidden="true">
+        <span class="desktop-hint">Arraste para olhar <span class="separator">·</span> WASD para caminhar</span>
+        <span class="touch-hint">Arraste para olhar</span>
+      </div>
+      <nav class="view-actions" aria-label="Controles de visualização">
+        <button id="resetBtn" type="button" aria-label="Restaurar ponto de vista" title="Restaurar ponto de vista">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true"><path d="M4 11a8 8 0 1 1 1.9 6.2M4 5v6h6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="fullscreenBtn" type="button" aria-label="Entrar em tela cheia" title="Tela cheia">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </nav>
+      <div class="touch-movement" aria-label="Caminhar">
+        <button type="button" data-move="KeyW" class="move-forward" aria-label="Caminhar para a frente">↑</button>
+        <button type="button" data-move="KeyA" class="move-left" aria-label="Caminhar para a esquerda">←</button>
+        <button type="button" data-move="KeyS" class="move-back" aria-label="Caminhar para trás">↓</button>
+        <button type="button" data-move="KeyD" class="move-right" aria-label="Caminhar para a direita">→</button>
+      </div>
+      <div id="loading" role="status" aria-live="polite">
+        <div class="loading-content">
+          <span class="loading-caption">QUARTO 01</span>
+          <p id="loadingText">Preparando o quarto...</p>
+          <div class="loading-track"><div id="loadingProgress"></div></div>
+        </div>
+      </div>
+      <div id="errorPanel" class="hidden" role="alert">
+        <div class="error-content">
+          <span class="loading-caption">QUARTO 01</span>
+          <p id="errorText">Não foi possível abrir o quarto neste navegador.</p>
+          <button type="button" onclick="window.location.reload()">Tentar novamente</button>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+.setup/
+node_modules/
+.sites-runtime/
+*.tar.gz
+qa-*.jpg
