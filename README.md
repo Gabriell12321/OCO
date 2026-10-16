@@ -4,10 +4,15 @@ Um único quarto 3D de terror psicológico, explorado exclusivamente em primeira
 
 [Baixar a versão Windows](https://github.com/Gabriell12321/OCO/releases/latest). Extraia o ZIP completo e abra `Quarto 01.exe`.
 
-A versão **0.11.0** traz uma câmera corporal: visão mais ampla, distorção
-suave da lente e movimento ligado aos passos, às viradas e à transferência
-de peso. O quarto continua exclusivamente em primeira pessoa, sem armas.
-As mudanças estão em [ATUALIZACAO-0.11.0.md](ATUALIZACAO-0.11.0.md).
+A versão **0.12.0** dá ao quarto sinais de uma rotina: cama mais mexida
+ao lado do abajur, leitura interrompida, caderno aberto e objetos apoiados
+com cuidado. Cortinas, tapete e armário têm pequenas diferenças de uso.
+A iluminação abre as sombras e reduz o excesso de amarelo, preservando
+a noite. As mudanças estão em [ATUALIZACAO-0.12.0.md](ATUALIZACAO-0.12.0.md).
+
+A câmera corporal mantém visão ampla, distorção suave da lente e movimento
+ligado aos passos, às viradas e à transferência de peso. O quarto continua
+exclusivamente em primeira pessoa, sem armas.
 
 A chuva natural e os trovões com clarão vermelho pela janela continuam
 presentes, junto das gotas no vidro e falhas do abajur. Clique no quarto

@@ -37,11 +37,13 @@ export function createRoomLighting(scene, room, { onFlicker = () => {}, onThunde
   RectAreaLightUniformsLib.init();
   const owned = [], full = [], efficient = [], warm = [];
   const add = light => { owned.push(light); scene.add(light); return light; };
-  add(new THREE.HemisphereLight(0x899eaf, 0x30251d, .105));
-  const windowLight = add(new THREE.RectAreaLight(0x9cb9d5, 1.12, 1.52, 1.42));
+  // Soft indirect light reveals the room's surfaces without lifting the bulb.
+  // Rebalance the existing emitters; the cached shadow budget stays unchanged.
+  add(new THREE.HemisphereLight(0x9aa8b3, 0x51483d, .22));
+  const windowLight = add(new THREE.RectAreaLight(0xadc1d2, 1.45, 1.52, 1.42));
   windowLight.position.copy(room.windowPosition).add(new THREE.Vector3(0, 0, .17));
   windowLight.lookAt(-.5, 1.1, 1.7); full.push(windowLight);
-  const windowFill = add(new THREE.PointLight(0x9cb9d5, .96, 7.5, 2));
+  const windowFill = add(new THREE.PointLight(0xadc1d2, 1.3, 7.5, 2));
   windowFill.position.copy(room.windowPosition).add(new THREE.Vector3(0, 0, .24));
   efficient.push(windowFill);
   const moon = add(new THREE.DirectionalLight(0xa2bbd4, .21));
@@ -49,17 +51,17 @@ export function createRoomLighting(scene, room, { onFlicker = () => {}, onThunde
   moon.castShadow = true; moon.shadow.mapSize.set(1024, 1024);
   Object.assign(moon.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: .2, far: 20 });
   Object.assign(moon.shadow, { bias: -.00012, normalBias: .008, radius: 3 });
-  const lamp = add(new THREE.PointLight(0xffd0a0, 5.8, 6, 2));
+  const lamp = add(new THREE.PointLight(0xffd6b0, 4.8, 6, 2));
   lamp.position.copy(room.lampPosition); lamp.castShadow = true;
   lamp.shadow.mapSize.set(LAMP_SHADOW_SIZE, LAMP_SHADOW_SIZE);
   Object.assign(lamp.shadow.camera, { near: .04, far: 8 });
   Object.assign(lamp.shadow, LAMP_SHADOW); warm.push([lamp, lamp.intensity]);
-  const bounce = add(new THREE.RectAreaLight(0xffd7ac, .58, .65, .45));
+  const bounce = add(new THREE.RectAreaLight(0xffdfbe, .88, .65, .45));
   bounce.position.copy(room.lampPosition).add(new THREE.Vector3(.05, .65, -.25));
   bounce.lookAt(-.4, 2.8, -1.8); full.push(bounce); warm.push([bounce, bounce.intensity]);
-  const lampFill = add(new THREE.PointLight(0xffd7ac, .38, 4.5, 2));
+  const lampFill = add(new THREE.PointLight(0xffdfbe, .70, 4.5, 2));
   lampFill.position.copy(bounce.position); efficient.push(lampFill); warm.push([lampFill, lampFill.intensity]);
-  const coolBounce = add(new THREE.PointLight(0x9db6cd, .32, 6, 2));
+  const coolBounce = add(new THREE.PointLight(0xafc0cc, .50, 6, 2));
   coolBounce.position.set(1.1, 1.9, -.3);
   // The existing exterior directional emitter already has the room opening
   // and mullions in its cached depth map. Raising it gives a red shaft with

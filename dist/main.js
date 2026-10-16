@@ -137,11 +137,12 @@ function getPerformanceSnapshot() {
   const stats = monitor.snapshot();
   const width = renderer?.domElement.width || 0, height = renderer?.domElement.height || 0;
   return {
-    ...stats, version: '0.11.0', ready, quality, qualityLabel: PROFILES[quality].label,
+    ...stats, version: '0.12.0', ready, quality, qualityLabel: PROFILES[quality].label,
     character: false, firstPersonOnly: true,
     renderer: 'WebGL2', pathTracing: false, shadows: 'cached',
     engine: 'OCO', engineBackend: 'Three.js / WebGL2', engineVersion: '0.1',
     staticScene: staticSceneStats || null, bed: room?.bedMetrics || null, chair: room?.chairMetrics || null,
+    livedIn: room?.livedInMetrics || null,
     atmosphere: { time: atmosphere.time, frozen: atmosphere.frozen, light: lighting?.snapshot() || null,
       rain: rain?.snapshot() || null },
     audio: roomAudio?.snapshot() || null,
@@ -225,7 +226,7 @@ function frame(now) {
 }
 
 window.Quarto01 = {
-  version: '0.11.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
+  version: '0.12.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
   get ready() { return ready; }, get quality() { return quality; }, get fps() { return monitor.fps; },
   get frameTimes() { return monitor.frameTimes.slice(); },
   get renderStats() { return renderer ? { ...renderer.info.render } : {}; },
@@ -309,6 +310,11 @@ function setDiagnosticView(id) {
     'bodycam-down': { position: [.7, -.8], yaw: -2.975, pitch: -1.38 },
     'bodycam-clear': { position: [1.5, 1.2], yaw: 0, pitch: -.12 },
     'bodycam-collision': { position: [2.4, 1.65], yaw: -Math.PI / 2, pitch: 0 },
+    'room-overview': { position: [1.5, 1.2], yaw: .6868176498, pitch: -.12 },
+    'room-bed': { position: [.85, .3], yaw: .77, pitch: -.4 },
+    'room-desk': { position: [1.6, .45], yaw: -.64, pitch: -.46 },
+    'room-bedside': { position: [1.12, -1.65], yaw: .675, pitch: -.57 },
+    'room-wear': { position: [1.15, 2.5], yaw: -3.024, pitch: -.324 },
   };
   if (!poses[id] || !controls.setDiagnosticPose(poses[id])) return false;
   playerShadow?.update(controls, 0, performance.now(), true);
@@ -343,7 +349,7 @@ async function init() {
   ]);
   if (environment) {
     environment.mapping = THREE.EquirectangularReflectionMapping;
-    scene.environment = environment; scene.environmentIntensity = .055;
+    scene.environment = environment; scene.environmentIntensity = .09;
     scene.background = environment; scene.backgroundIntensity = .025; scene.backgroundBlurriness = .025;
     scene.environmentRotation.y = scene.backgroundRotation.y = .7;
   }

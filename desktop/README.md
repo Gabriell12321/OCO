@@ -1,6 +1,6 @@
 # Quarto 01 para Windows
 
-Versão 0.11.0, exclusivamente em primeira pessoa. Empacotamento portátil com
+Versão 0.12.0, exclusivamente em primeira pessoa. Empacotamento portátil com
 Electron oficial 44.7.2 para Windows x64. O usuário
 abre `Quarto 01.exe`; Node, navegador, instalação e internet não são necessários.
 
@@ -70,6 +70,12 @@ com séries de PNGs andando, correndo e girando o mouse. Ele exige assentamento
 após soltar as teclas, resposta imediata ao mouse, colisão repetível e ausência
 de novos passos enquanto o jogador empurra a parede. Essas capturas não são
 usadas como medição de FPS; o percurso de 35 segundos mede a fluidez.
+`--benchmark-room` mede cinco vistas durante três segundos cada: quarto,
+cama, mesa, criado-mudo e parede. Congela luz e tempo, mantém a lente ativa
+e trava a resolução para comparar versões. Salva as cinco vistas também em
+Qualidade após aquecimento. As estatísticas de luminosidade usam coordenadas
+fixas da imagem; cada região precisa de inspeção visual antes de ser descrita
+como parede ou piso. Elas representam o RGB de exibição, não luz física.
 `--capture-views-only` compara a sombra ligada e desligada na mesma câmera,
 na parede e nos três lados da cama. O teste também anda para frente e para
 trás ao lado da cama, mede a distância entre jogador e projeção, retorna à

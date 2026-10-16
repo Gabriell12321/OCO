@@ -21,6 +21,15 @@ A cadeira da versão 0.10.0 é modelada em código em
 e linho listadas acima, com UVs em metros e ajustes locais de material.
 Nenhum arquivo adicional de textura ou modelo é necessário para a cadeira.
 
+## Objetos e marcas da versão 0.12.0
+
+O caderno, envelope, caneta, óculos e marcador são geometria própria
+em `dist/bedroom/lived-in.js`. As notas legíveis, papel, dobra do envelope
+e marca de caneca são desenhados em um atlas local de 1024² no carregamento.
+As marcas de contato nas paredes e no piso usam cores e alfa por vértice
+em `dist/bedroom/surface-wear.js`. Não há novas imagens ou modelos de
+terceiros nesta atualização; madeira e tecidos reutilizam as fontes acima.
+
 ## Iluminação de ambiente
 
 O HDRI `assets/moonlit_room_1k.hdr` vem de [Rogland Moonlit Night, Poly Haven](https://polyhaven.com/a/rogland_moonlit_night), sob CC0. O arquivo equiretangular de 1k é incluído localmente e alimenta tanto o ambiente físico quanto a vista pela janela. A renderização não solicita a API do Poly Haven durante o uso.

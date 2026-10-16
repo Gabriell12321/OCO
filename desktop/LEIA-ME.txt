@@ -1,4 +1,4 @@
-QUARTO 01 — WINDOWS 64 BITS — VERSÃO 0.11.0
+QUARTO 01 — WINDOWS 64 BITS — VERSÃO 0.12.0
 
 1. Extraia a pasta inteira se estiver abrindo o arquivo ZIP.
 2. Abra "Quarto 01.exe" dentro da pasta "Quarto 01".
@@ -23,6 +23,8 @@ explorado exclusivamente em primeira pessoa. A sombra usa uma malha humana,
 com pés anatômicos e uma passada ligada à distância realmente percorrida.
 A câmera corporal acompanha a caminhada e a corrida com balanço e inércia suaves.
 A cadeira recebeu modelagem mais detalhada e materiais próprios.
+O quarto tem iluminação mais legível, roupas de cama assimétricas e detalhes
+de uso nos móveis, na parede e nos objetos pessoais.
 Há chuva do lado de fora e gotas escorrendo na janela. A iluminação muda
 durante os lampejos da lâmpada, acompanhados por estalos e ruído elétrico.
 O som da chuva acompanha a tempestade, com trovões e clarões vermelhos

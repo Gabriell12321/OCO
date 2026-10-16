@@ -1,3 +1,106 @@
+# Validação da versão 0.12.0
+
+## Geometria e integração
+
+As quinze verificações locais passaram. A cama mantém cinco meshes e
+34.934 triângulos; os testes conferem a abertura real do lado direito,
+o apoio do travesseiro deslocado, a dobra e a manta sobre sua superfície.
+A separação medida da dobra ficou entre 1,497 e 4,718 mm; o menor contato
+do travesseiro ficou a 0,345 mm. Caderno, caneta e óculos têm erro de apoio
+menor que 0,24 mm. Não há atualização desses objetos por quadro.
+
+A revisão independente conferiu a porta do armário dentro do collider,
+franjas no referencial do tapete, normais/transparência das marcas e
+manutenção dos emissores e mapas de sombra. Também identificou a alça
+desconectada da caneca antiga; orientação e contato foram corrigidos.
+As cinco vistas nativas foram inspecionadas, com segunda revisão da cama.
+Não foram observados buracos, objetos suspensos ou interseções nessas vistas.
+
+## Comparação nativa com 0.11.0
+
+Intel Iris Xe, D3D11/ANGLE, janela 1900 × 977, perfil Desempenho, resolução
+interna fixa 1004 × 516 e FXAA. A referência foi preservada com 432 hashes.
+Somente o harness e as cinco poses de diagnóstico foram acrescentados à
+cópia privada; os outros 430 arquivos permaneceram idênticos. A versão
+nova testada tem 434 arquivos de runtime conferidos por SHA256.
+
+As duas execuções usam os mesmos pontos de câmera, FOV76, lente ligada
+e atmosfera congelada: tempo zero, abajur aceso, chuva e trovão desligados.
+Cada medição dura três segundos após aquecimento. Todas as cinco fases
+de cada versão passaram pelo guard de foco e cobertura temporal, na
+primeira tentativa, sem mudança da resolução.
+
+| Vista | FPS 0.11 | FPS 0.12 | Quadro p95 0.11 → 0.12 | GPU média 0.11 → 0.12 | Draw calls 0.11 → 0.12 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Geral | 60,18 | 60,03 | 16,9 → 17,2 ms | 12,73 → 14,43 ms | 101 → 104 |
+| Cama | 57,03 | 57,22 | 32,6 → 18,2 ms | 15,27 → 14,97 ms | 95 → 98 |
+| Escrivaninha | 60,25 | 58,95 | 16,8 → 17,0 ms | 8,05 → 11,05 ms | 67 → 70 |
+| Cabeceira | 60,11 | 60,17 | 17,0 → 16,9 ms | 14,04 → 14,84 ms | 79 → 81 |
+| Interruptor | 60,22 | 60,26 | 16,9 → 16,9 ms | 5,77 → 7,51 ms | 24 → 25 |
+
+O conteúdo acrescenta de um a três draw calls nessas vistas. Na visão
+geral, os triângulos desenhados passam de 128.890 para 132.586. Não há
+ganho geral de FPS demonstrado: são amostras curtas, próximas do limite
+de apresentação de 60 Hz, e a GPU aumentou em quatro das cinco vistas.
+O perfil e a resolução fazem parte do resultado; ele não garante a mesma
+fluidez em Qualidade ou em outras máquinas.
+
+As imagens também foram capturadas em Qualidade a 1582 × 812 para revisão
+de superfície. O HUD dessas capturas inclui a compilação e a troca de
+perfil; ele não é usado como benchmark. Houve um aviso do compilador
+ANGLE no FXAA (X3595/X4000), sem erro de shader ou falha de renderização.
+Esse aviso permanece registrado no relatório, sem ser ocultado.
+
+Uma medição separada após estabilização do perfil Qualidade registrou
+32,65 FPS, p95 de 33,9 ms e CPU média de 6,93 ms, em 98 quadros/3,002 s.
+A resolução adaptativa estava em 1424 × 732, portanto essa amostra não
+equivale às fotos fixas de 1582 × 812. A soma dos tempos de quadro diferiu
+da duração real em apenas 2,4 ms, com a janela ativa. O retorno a
+Desempenho registrou 59,30 FPS. A troca dos três perfis também passou.
+Os valores transitórios de 1–7 FPS vistos no HUD durante a primeira troca
+não são a taxa sustentada; Qualidade continua mais pesado nesta GPU.
+
+Na região de parede da vista geral, coordenadas normalizadas
+[0,37; 0,14; 0,43; 0,25], a média ponderada dos canais da imagem passou
+de 42,27 para 55,09 em escala 0–255, sem pixels acima de 245. Essa região
+foi conferida visualmente: a textura ficou mais legível. É uma medida
+de brilho da imagem exibida, não luminância física nem nota de realismo;
+reflete em conjunto luz, material e vinheta.
+
+## Movimento, áudio e regressões
+
+O percurso válido durou 35,037 s, com 2.091 quadros, chuva, áudio e trovão
+ativos. Todas as fases mantiveram 1004 × 516, sem interrupção por foco.
+
+| Medição 0.12.0 | FPS | Quadro médio | p95 | p99 | CPU média |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Percurso completo | 59,68 | 16,76 ms | 17,0 ms | 17,5 ms | 5,77 ms |
+| Trechos em movimento | 59,67 | 16,77 ms | 17,0 ms | 17,6 ms | 5,70 ms |
+
+Os trechos em movimento somam 25,020 s e 1.493 quadros. Caminhada com
+mouse registrou 59,73 FPS; corrida com mouse, 59,68 FPS. Áudio real,
+tempestade e regressão da sombra passaram; a defasagem máxima observada
+da projeção foi 18,2 mm. O teste de câmera corporal confirmou limites,
+resposta imediata do mouse, assentamento em zero e colisões repetíveis.
+Uma tentativa do mouse perdeu foco, foi descartada e repetida pelo guard.
+As rodadas válidas de movimento e câmera terminaram sem erros ou avisos.
+
+Duas primeiras aberturas de diagnóstico fecharam sem produzir relatório;
+uma registrou ERR_FAILED ao carregar a página local. Elas não contam como
+teste executado. O helper local passou a exigir um JSON novo e válido,
+e os dois roteiros foram repetidos com sucesso. Não há evidência suficiente
+para atribuir esses encerramentos a uma causa específica. Os relatórios
+aceitos preservam a cobertura de tempo e os eventos de foco.
+
+Evidências locais da comparação, fora do Git:
+
+- `desktop/results/v0.11.0-room-baseline/`: imagens, telemetria e hashes.
+- `desktop/results/v0.12.0-room-first/`: mesmos enquadramentos, relatórios e hashes.
+- `desktop/results/v0.12.0-quality-steady/`: medição após estabilização do perfil.
+- `desktop/results/v0.12.0-smoke-final/`: troca dos três perfis.
+- `desktop/results/v0.12.0-movement-retry/`: percurso, áudio, tempestade e sombra.
+- `desktop/results/v0.12.0-bodycam-retry/`: lente, câmera e colisões.
+
 # Validação da versão 0.11.0
 
 Esta versão altera a altura, o campo de visão e o movimento da câmera.

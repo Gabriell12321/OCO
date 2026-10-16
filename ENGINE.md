@@ -47,6 +47,27 @@ escala em 1, para não atribuir a uma otimização o ganho de uma resolução me
 
 ## Conteúdo e materiais
 
+`dist/bedroom/lived-in.js` constrói dois conjuntos de objetos pessoais:
+caderno, envelope e caneta na escrivaninha; óculos e marcador junto ao
+livro de cabeceira. As páginas têm curvatura e texto comum desenhado em
+um atlas de 1024². Os conjuntos somam 2.694 triângulos e cinco meshes
+antes da compilação estática. `dist/bedroom/surface-wear.js` acrescenta
+sete marcas localizadas de contato e umidade, em um mesh de 420 triângulos
+com transparência por vértice, sem textura. Ambos são calculados uma vez;
+não há simulação, partículas ou upload de geometria durante o jogo.
+
+Na versão 0.12.0, o leito usado fica à direita, perto do abajur. Travesseiro,
+abertura do edredom e manta seguem esse lado; a malha dos tecidos mantém
+34.934 triângulos. As franjas usam a transformação do tapete, e a porta
+ligeiramente aberta do armário tem dobradiça, carcaça e colisão coerentes.
+Os livros empilhados e a caneca foram assentados sobre o tampo. A caneca
+tem parede interna, lábio e superfície de café abaixo da borda.
+
+O balanço de luz reduz a fonte direta do abajur e aumenta o preenchimento
+indireto já existente. Paredes e teto usam multiplicadores mais neutros;
+o ambiente passa de 0,055 para 0,09 e a vinheta da lente, de 0,22 para 0,12.
+A quantidade de emissores, mapas de sombra e passes de imagem não muda.
+
 `dist/controls.js` mantém a posição física e o rumo do jogador separados
 dos movimentos secundários da câmera de peito. Um relógio de distância
 compartilhado com a sombra dirige a passada e os impactos. Subdivisões de

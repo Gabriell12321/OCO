@@ -20,12 +20,13 @@ const CAPTURE_VIEWS_ONLY = process.argv.includes('--capture-views-only');
 const BED_BENCHMARK = process.argv.includes('--benchmark-bed');
 const CHAIR_BENCHMARK = process.argv.includes('--benchmark-chair');
 const BODYCAM_BENCHMARK = process.argv.includes('--benchmark-bodycam');
+const ROOM_BENCHMARK = process.argv.includes('--benchmark-room');
 const BED_SURFACE_BASE_ONLY = process.argv.includes('--capture-bed-base');
 const BED_SURFACES = process.argv.includes('--capture-bed-surfaces') || BED_SURFACE_BASE_ONLY;
 const WEATHER_BENCHMARK = process.argv.includes('--benchmark-weather');
 const AUDIO_PROBE = process.argv.includes('--probe-audio');
 const STORM_BENCHMARK = process.argv.includes('--benchmark-storm') || process.argv.includes('--probe-storm');
-const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY || BED_BENCHMARK || BED_SURFACES || WEATHER_BENCHMARK || AUDIO_PROBE || STORM_BENCHMARK || CHAIR_BENCHMARK || BODYCAM_BENCHMARK;
+const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY || BED_BENCHMARK || BED_SURFACES || WEATHER_BENCHMARK || AUDIO_PROBE || STORM_BENCHMARK || CHAIR_BENCHMARK || BODYCAM_BENCHMARK || ROOM_BENCHMARK;
 const requestedQualityArgument = process.argv.find(arg => arg.startsWith('--benchmark-quality='));
 const requestedQuality = requestedQualityArgument?.slice('--benchmark-quality='.length);
 const BENCHMARK_QUALITY = ['performance', 'balanced', 'quality'].includes(requestedQuality) ? requestedQuality : null;
@@ -376,6 +377,70 @@ async function runBedBenchmark(win) {
   } catch (error) {
     writeResult({ success: false, test: 'bed-fixed-resolution-five-views', message: String(error), errors: ERRORS });
     app.exit(1);
+  }
+}
+
+function roomImageLuminance(image) {
+  const size = image.getSize(1), pixels = image.toBitmap({ scaleFactor: 1 });
+  const regions = { scene: [.04, .15, .96, .88], wallSample: [.37, .14, .43, .25], floorSample: [.58, .71, .72, .86] };
+  const results = {};
+  for (const [name, bounds] of Object.entries(regions)) {
+    const values = [];
+    for (let y = Math.floor(bounds[1] * size.height); y < bounds[3] * size.height; y++) {
+      for (let x = Math.floor(bounds[0] * size.width); x < bounds[2] * size.width; x++) {
+        const i = (y * size.width + x) * 4;
+        values.push(.2126 * pixels[i + 2] + .7152 * pixels[i + 1] + .0722 * pixels[i]);
+      }
+    }
+    values.sort((a, b) => a - b);
+    results[name] = { normalizedBounds: bounds, pixels: values.length,
+      meanDisplayLuma: values.reduce((a, b) => a + b, 0) / values.length,
+      medianDisplayLuma: values[Math.floor(values.length / 2)],
+      below16Fraction: values.filter(value => value < 16).length / values.length,
+      above245Fraction: values.filter(value => value > 245).length / values.length };
+  }
+  return { method: 'Rec.709 weights on display RGB bytes; matched screenshot coordinates, not physical luminance', size, regions: results };
+}
+
+async function runRoomBenchmark(win) {
+  try {
+    const initial = await win.webContents.executeJavaScript(buildBedPrepareScript(BENCHMARK_QUALITY || 'performance'));
+    const atmosphere = { time: 0, frozen: true, rain: false, lamp: 1, thunder: 0 };
+    await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere(' + JSON.stringify(atmosphere) + '); window.Quarto01.setDiagnosticLens(true)');
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    const views = [], qualityCaptures = [];
+    for (const view of ['room-overview', 'room-bed', 'room-desk', 'room-bedside', 'room-wear']) {
+      const measured = await measureDiagnosticView(win, { id: view, view, duration: 3000, turn: false });
+      const { image, ...capture } = await captureAtmosphereView(win, view, view, atmosphere);
+      views.push({ ...measured, capture, luminance: roomImageLuminance(image) });
+    }
+    await win.webContents.executeJavaScript("window.Quarto01.setQuality('quality')");
+    await focusDiagnosticWindow(win);
+    await win.webContents.executeJavaScript(`(async () => {
+      const room = window.Quarto01, start = room.getPerformanceSnapshot().totalFrames, deadline = performance.now() + 20000;
+      while (room.getPerformanceSnapshot().totalFrames < start + 12) {
+        if (performance.now() > deadline) throw new Error('Qualidade nao terminou de renderizar.');
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      await new Promise(resolve => setTimeout(resolve, 2500));
+    })()`);
+    for (const view of ['room-overview', 'room-bed', 'room-desk', 'room-bedside', 'room-wear']) {
+      const { image, ...capture } = await captureAtmosphereView(win, view, view + '-quality', atmosphere);
+      qualityCaptures.push({ ...capture, luminance: roomImageLuminance(image) });
+    }
+    await win.webContents.executeJavaScript("window.Quarto01.setQuality('performance')");
+    const fixedResolution = views.every(view => view.fixedResolution &&
+      view.before.drawingBufferWidth === initial.snapshot.drawingBufferWidth && view.before.drawingBufferHeight === initial.snapshot.drawingBufferHeight);
+    const atmosphereFrozen = views.every(view => view.after.atmosphere.time === 0 && view.after.atmosphere.frozen &&
+      !view.after.atmosphere.rain.enabled && view.after.atmosphere.light.lampGain === 1 && view.after.atmosphere.light.thunderGain === 0);
+    const passed = fixedResolution && atmosphereFrozen && views.every(view => view.timingIntegrity.valid && view.poseVerified &&
+      view.after.bodycamLens.enabled && view.after.renderStats.points === 0 && (!view.gpu.available || view.gpu.samples > 4)) &&
+      qualityCaptures.every(capture => capture.snapshot.ready && !capture.snapshot.paused && capture.snapshot.quality === 'quality') &&
+      !ERRORS.some(error => error.kind !== 'console-warning');
+    writeResult({ success: passed, test: 'room-five-views-fixed-resolution', initial, atmosphere,
+      fixedResolution, atmosphereFrozen, views, qualityCaptures, errors: ERRORS }); app.exit(passed ? 0 : 1);
+  } catch (error) {
+    writeResult({ success: false, test: 'room-five-views-fixed-resolution', message: String(error), errors: ERRORS }); app.exit(1);
   }
 }
 
@@ -890,7 +955,8 @@ function createWindow() {
       await win.webContents.executeJavaScript(INSTALL_DIAGNOSTIC_INPUT_GUARD);
       win.setTitle('Quarto 01 — Teste automático');
     }
-    if (BODYCAM_BENCHMARK) runBodycamBenchmark(win);
+    if (ROOM_BENCHMARK) runRoomBenchmark(win);
+    else if (BODYCAM_BENCHMARK) runBodycamBenchmark(win);
     else if (CHAIR_BENCHMARK) runChairBenchmark(win);
     else if (STORM_BENCHMARK) runStormBenchmark(win);
     else if (AUDIO_PROBE) runAudioProbe(win);

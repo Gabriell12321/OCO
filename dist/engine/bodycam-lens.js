@@ -35,7 +35,7 @@ export function attachBodycamLens(output) {
         vec2 split = (sensorUV - 0.5) * fringe;
         gl_FragColor.r = texture2D(tDiffuse, sensorUV + split).r;
         gl_FragColor.b = texture2D(tDiffuse, sensorUV - split).b;
-        gl_FragColor.rgb *= 1.0 - 0.22 * smoothstep(0.18, 1.0, radiusSquared);
+        gl_FragColor.rgb *= 1.0 - 0.12 * smoothstep(0.18, 1.0, radiusSquared);
       }
     `);
   output.material.needsUpdate = true;
@@ -46,7 +46,7 @@ export function attachBodycamLens(output) {
     setEnabled(enabled) { uniforms.bodycamEnabled.value = enabled ? 1 : 0; },
     snapshot() {
       return { enabled: Boolean(uniforms.bodycamEnabled.value), distortion: uniforms.bodycamDistortion.value,
-        chromaticFringe: 'subpixel-periphery', vignette: .22, extraPasses: 0, extraTargets: 0 };
+        chromaticFringe: 'subpixel-periphery', vignette: .12, extraPasses: 0, extraTargets: 0 };
     },
   };
 }

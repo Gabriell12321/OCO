@@ -189,12 +189,12 @@ export async function createMaterials(renderer, onProgress = () => {}) {
   });
   const wall = surface('Faded putty lining paper over plaster', maps.plaster, {
     map: liningPaper(maps.plaster.map),
-    color: 0xd2d0bd,
+    color: 0xdfddd3,
     roughness: 1,
     normalScale: new THREE.Vector2(0.10, 0.10),
   });
   const ceiling = surface('Warm plaster ceiling', maps.plaster, {
-    color: 0xded9c8,
+    color: 0xe3dfd4,
     roughness: 1,
     normalScale: new THREE.Vector2(0.06, 0.06),
   });

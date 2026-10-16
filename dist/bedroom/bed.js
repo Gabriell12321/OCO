@@ -59,10 +59,11 @@ export function createBedding(parent, materials, cx, cz) {
     owner.add(mesh); meshes.push(mesh); return mesh;
   }
 
-  function pillow(x, y, z, angle, usedSide) {
+  function pillow(x, y, z, angle, usedSide, used = false) {
     const group = new THREE.Group();
-    group.position.set(x, y, z); group.rotation.set(-.07, angle, usedSide * .018);
-    group.name = 'Sewn cotton pillow'; group.userData.bedPart = 'pillow'; parent.add(group);
+    group.position.set(x, y, z); group.rotation.set(used ? -.09 : -.055, angle, used ? -.032 : -.012);
+    group.name = used ? 'Used pillow, pulled forward from the right sleeping place' : 'Cotton pillow left in place';
+    group.userData.bedPart = 'pillow'; parent.add(group);
     const xs = axis([[-1, -.8, 5], [-.8, .8, 28], [.8, 1, 5]]);
     const zs = axis([[-1, -.75, 4], [-.75, .75, 18], [.75, 1, 4]]);
     // Two actual cloth panels meet at a pinched seam. Unlike a deformed sphere,
@@ -75,7 +76,9 @@ export function createBedding(parent, materials, cx, cz) {
       const tuck = smooth(edge / .075);
       let height = (top ? .092 : -.062) * cushion;
       if (top) {
-        height -= .027 * gaussian((x + usedSide * .055) / .12) * gaussian((z - .018) / .105) * tuck;
+        height -= (used ? .043 : .020) * gaussian((x + usedSide * .047) / (used ? .155 : .12))
+          * gaussian((z - (used ? -.016 : .018)) / (used ? .13 : .105)) * tuck;
+        if (used) height += .008 * gaussian((x - .15) / .10) * gaussian((z - .07) / .15) * tuck;
         // Short gathers originate at the side seam; none cross the entire face.
         for (const [start, end, amount] of [[-.13, -.07, .004], [.032, .11, -.0038], [.15, .09, .0045]]) {
           const along = 1 - Math.abs(u), center = start + (end - start) * smooth(along / .48);
@@ -107,9 +110,16 @@ export function createBedding(parent, materials, cx, cz) {
     const seam = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(seamPoints, true, 'centripetal'), 88, .0015, 4, true);
     const material = copyMaterial(materials.linen); material.side = THREE.DoubleSide;
     add([top, bottom, flange, seam], material, 'pillow', 'Cotton pillow: depressed panels, seam gathers and narrow sewn flange', group);
+    // Find the resting height once. A moved pillow may rest partly on the
+    // turned duvet and partly on the sheet; it must not cut through either.
+    const rotation = new THREE.Matrix4().makeRotationFromEuler(group.rotation);
+    let rise = -Infinity;
+    for (let row = 1; row < zs.length - 1; row += 2) for (let col = 1; col < xs.length - 1; col += 2) {
+      const underside = panel(xs[col], zs[row], false).applyMatrix4(rotation).add(group.position);
+      rise = Math.max(rise, supportHeight(underside.x - cx, underside.z - cz) + .001 - underside.y);
+    }
+    group.position.y += rise;
   }
-  pillow(cx - .46, .697, cz - .82, -.055, -1);
-  pillow(cx + .41, .701, cz - .86, .09, 1);
 
   // Central samples are about three centimetres apart. Extra rows describe the
   // circular mattress shoulder, where silhouette curvature actually needs them.
@@ -129,6 +139,10 @@ export function createBedding(parent, materials, cx, cz) {
   function folds(x, z) {
     let height = .011 * gaussian((x - .15) / .52) * gaussian((z - .21) / .63);
     height -= .006 * gaussian((x + .21) / .35) * gaussian((z + .28) / .34);
+    // One broad compression leads away from the opened right sleeping place.
+    // Its shallow trough and shoulder connect the displaced edge to the body.
+    height += .018 * gaussian((x - .45 + z * .30) / .16) * gaussian((z + .21) / .38);
+    height -= .006 * gaussian((x - .20 + z * .24) / .20) * gaussian((z + .17) / .40);
     for (const f of pulls) {
       const dx = x - f.ax, dz = z - f.az, along = (dx * f.dx + dz * f.dz) / f.length;
       if (along < -.12 || along > 1.1) continue;
@@ -141,7 +155,24 @@ export function createBedding(parent, materials, cx, cz) {
     }
     return height;
   }
+  function headPull(u) {
+    return .265 * smooth((u + .15) / .98);
+  }
+  function drapedZ(u, v) {
+    // The actual top boundary moves, exposing the sheet under the right side.
+    // This monotone warp keeps the cloth connected and fades before the foot.
+    return v + headPull(u) * (1 - smooth((v + .82) / 1.18));
+  }
+  function restZ(u, z) {
+    let lo = -.82, hi = 1.47;
+    for (let i = 0; i < 15; i++) {
+      const mid = (lo + hi) * .5;
+      if (drapedZ(u, mid) < z) lo = mid; else hi = mid;
+    }
+    return (lo + hi) * .5;
+  }
   function sample(u, v) {
+    v = drapedZ(u, v);
     const corner = .20, start = 1.47 - corner, end = Math.max(0, v - start);
     const rowWidth = v > start ? 1.25 - corner + Math.sqrt(Math.max(0, corner * corner - end * end)) : 1.25;
     let x = u / 1.25 * rowWidth;
@@ -207,17 +238,37 @@ export function createBedding(parent, materials, cx, cz) {
     const p = sample(x, z); p.y += offset;
     return p;
   }
+  function supportHeight(x, z) {
+    if (z < drapedZ(x, -.82)) return .615;
+    let height = sample(x, restZ(x, z)).y;
+    const start = foldSample(x, 0).z - cz, end = foldSample(x, .84).z - cz;
+    if (z >= start && z <= end) {
+      let lo = 0, hi = .84;
+      for (let i = 0; i < 12; i++) {
+        const mid = (lo + hi) * .5;
+        if (foldSample(x, mid).z - cz < z) lo = mid; else hi = mid;
+      }
+      height = Math.max(height, foldSample(x, (lo + hi) * .5).y);
+    }
+    return height;
+  }
   const folded = copyMaterial(linen); folded.color.multiplyScalar(1.025);
   add([surface(foldXs, foldZs, foldSample, (x, t) => [x, -.785 + t * .40]), hem(foldXs, foldZs, foldSample, .0018, 112)],
     folded, 'duvet-fold', 'Turned duvet with real rounded return, layered thickness and stitched edge');
 
   const throwXs = axis([[-1.22, -1.02, 4], [-1.02, -.84, 8], [-.84, .84, 46], [.84, 1.02, 8], [1.02, 1.22, 4]]);
   const throwZs = axis([[.76, .99, 10], [.99, 1.26, 13], [1.26, 1.41, 7]]);
+  function throwRest(x, z) {
+    const liftedCorner = gaussian((x - .84) / .37) * gaussian((z - .79) / .20);
+    const skew = .055 * x * (1 - smooth((z - .76) / .69));
+    return [x - .090 * liftedCorner, z + skew + .018 * x + .095 * liftedCorner];
+  }
   function throwSample(x, z) {
-    const p = sample(x, z), side = smooth((Math.abs(x) - .8) / .34), foot = smooth((z - 1.04) / .3);
+    const [u, v] = throwRest(x, z);
+    const p = sample(u, v), side = smooth((Math.abs(u) - .8) / .34), foot = smooth((v - 1.04) / .3);
     const top = 1 - Math.max(side, foot) * .88;
     const lip = gaussian((z - .805 + x * .025 + Math.sin(x * 3) * .009) / .032) * .011;
-    const gathered = gaussian((x - .44 + (z - .9) * .65) / .070) * gaussian((z - .98) / .30) * .014;
+    const gathered = gaussian((x - .68 + (z - .9) * .65) / .135) * gaussian((z - .89) / .21) * .026;
     p.y += .014 + (lip + gathered) * top;
     p.x += Math.sign(x) * side * .013; p.z += foot * .013;
     return p;
@@ -235,8 +286,13 @@ export function createBedding(parent, materials, cx, cz) {
   }
   add(throwGeometry, wool, 'throw', 'Woven foot blanket: supported folds, sewn hem and individual short yarn ends');
 
+  // The disturbed pillow and opened cover belong to the same sleeping place.
+  // One clear change of posture is more convincing than random clutter.
+  pillow(cx - .46, .697, cz - .84, -.035, -1);
+  pillow(cx + .39, .701, cz - .675, .235, 1, true);
+
   const parts = {};
   for (const mesh of meshes) parts[mesh.userData.bedPart] = (parts[mesh.userData.bedPart] || 0) + mesh.geometry.index.count / 3;
   const metrics = { meshes: meshes.length, triangles: Object.values(parts).reduce((a, b) => a + b, 0), parts, uvUnits: 'metres', animated: false };
-  return { metrics, sample, foldSample, throwSample, meshes };
+  return { metrics, sample, foldSample, throwSample, throwRest, supportHeight, meshes };
 }

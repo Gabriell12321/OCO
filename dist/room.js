@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createBedding } from './bedroom/bed.js';
 import { createChair } from './bedroom/chair.js';
+import { createLivedInDetails } from './bedroom/lived-in.js';
+import { createSurfaceWear } from './bedroom/surface-wear.js';
 
 // A quiet, occupied bedroom. All measurements are in metres.
 export function createRoom(scene, materials) {
@@ -185,23 +187,23 @@ export function createRoom(scene, materials) {
 
   // Pleated curtains hang with varying depth and softly sagged hems.
   const curtainMaterial = cloneSurface(M.curtain); curtainMaterial.side = THREE.DoubleSide;
-  for (const [cx, cw, phase] of [[-.67, .46, .4], [1.48, .47, 2.3]]) {
-    const geo = new THREE.PlaneGeometry(cw, 2.2, 36, 58);
+  for (const [cx, cw, phase, height] of [[-.68, .46, .4, 2.19], [1.49, .43, 2.3, 2.11]]) {
+    const geo = new THREE.PlaneGeometry(cw, height, 36, 58);
     const positions = geo.attributes.position;
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i), y = positions.getY(i);
-      const down = (1.1 - y) / 2.2;
-      const pleat = Math.sin((x / cw + .5) * Math.PI * 11 + phase);
-      positions.setXYZ(i, x * (.82 + down * .18) + Math.sin(down * 2.7 + phase) * .014,
-        y + Math.sin((x / cw + .5) * 14) * .009 * down,
+      const down = (height / 2 - y) / height;
+      const pleat = Math.sin((x / cw + .5) * Math.PI * 11 + phase + .32 * Math.sin(x * 19 + phase));
+      positions.setXYZ(i, x * (.82 + down * .18) + Math.sin(down * 2.7 + phase) * .021,
+        y + Math.sin((x / cw + .5) * 14 + phase) * .012 * down,
         pleat * (.026 + down * .025) + Math.sin(down * 3 + x * 5) * .013);
     }
-    geo.computeVertexNormals(); mesh(geo, curtainMaterial, cx, 1.55, -3.03);
+    geo.computeVertexNormals(); mesh(geo, curtainMaterial, cx, 2.65 - height / 2, -3.03);
     for (let i = 0; i < 6; i++) {
       const ring = mesh(new THREE.TorusGeometry(.022, .0045, 5, 14), M.brass, cx - cw * .37 + i * cw * .15, 2.69, -3.03);
       ring.rotation.y = Math.PI / 2;
     }
-    rod(point(cx - cw / 2, .456, -3.01), point(cx + cw / 2, .456, -3.01), .003, cottonStitch);
+    // The hem belongs to the cloth geometry, avoiding a rigid horizontal rod.
   }
   rod(point(-1, 2.705, -3.03), point(1.8, 2.705, -3.03), .014, M.dark);
   for (const x of [-1.03, 1.83]) mesh(new THREE.SphereGeometry(.036, 16, 12), M.dark, x, 2.705, -3.03);
@@ -321,37 +323,51 @@ export function createRoom(scene, materials) {
   const rugMaterial = new THREE.MeshStandardMaterial({ map: rugTexture, roughness: 1, normalMap: M.rug.normalMap, normalScale: new THREE.Vector2(.3,.3), roughnessMap: M.rug.roughnessMap, bumpMap: rugTexture, bumpScale: .001 });
   const rugGeo = new THREE.PlaneGeometry(2.45, 2.03, 45, 40);
   const rugP = rugGeo.attributes.position;
+  const rugHeight = (x, y) => Math.sin(x * 11 + y * 9) * .0009 +
+    Math.max(0, (Math.abs(x) - 1.13) / .1) * .004 * Math.sin(y * 12) +
+    .018 * THREE.MathUtils.clamp((x - .91) / .315, 0, 1) ** 2 * THREE.MathUtils.clamp((-y - .70) / .315, 0, 1) ** 2;
   for (let i = 0; i < rugP.count; i++) {
     const x = rugP.getX(i), y = rugP.getY(i);
-    rugP.setZ(i, Math.sin(x * 11 + y * 9) * .0009 + Math.max(0, (Math.abs(x) - 1.13) / .1) * .004 * Math.sin(y * 12));
+    rugP.setZ(i, rugHeight(x, y));
   }
   rugGeo.computeVertexNormals();
-  const rug = mesh(rugGeo, rugMaterial, -.64, .016, .56); rug.rotation.x = -Math.PI / 2; rug.rotation.z = -.025;
-  for (const z of [-.48, 1.61]) for (let i = 0; i < 76; i++) {
-    const x = -1.84 + i * .032;
-    rod(point(x, .014, z), point(x + Math.sin(i * 4) * .005, .014, z + (z < 0 ? -.045 : .045)), .0018, plain('#8e7e63'));
+  const rug = mesh(rugGeo, rugMaterial, -.64, .016, .56); rug.rotation.x = -Math.PI / 2; rug.rotation.z = -.043;
+  for (const edge of [-1.015, 1.015]) for (let i = 0; i < 76; i++) {
+    if (i === 6 || i === 59 || (edge < 0 && i === 73)) continue;
+    const x = -1.2 + i * .032, length = .031 + .008 * Math.sin(i * 2.3 + edge);
+    const h = rugHeight(x, edge) + .001;
+    rod(point(x, edge, h), point(x + Math.sin(i * 4) * .005, edge + Math.sign(edge) * length, h),
+      .0015, plain('#8e7e63'), rug);
   }
 
   // Tall walnut wardrobe along the left wall. Panelled doors and individual hinges.
   const wardrobe = new THREE.Group(); wardrobe.position.set(-2.66, 0, .7); wardrobe.rotation.y = Math.PI / 2; room.add(wardrobe);
-  block(-2.66, .7, .64, 1.45, .09); contact(-2.64, .7, 1, 1.72, .32);
-  box(1.43, 1.96, .57, 0, 1.1, 0, M.wood, .018, wardrobe);
+  block(-2.66, .7, .74, 1.45, .09); contact(-2.64, .7, 1, 1.72, .32);
+  // A real cabinet shell permits the tired left leaf to remain slightly ajar.
+  box(1.43, 1.96, .027, 0, 1.1, -.272, M.wood, .008, wardrobe);
+  for (const x of [-.701, .701]) box(.028, 1.96, .57, x, 1.1, 0, M.wood, .008, wardrobe);
+  for (const y of [.136, 2.064]) box(1.39, .032, .55, 0, y, 0, M.wood, .008, wardrobe);
+  box(1.38, .022, .52, 0, .78, 0, M.dark, .004, wardrobe);
   box(1.53, .085, .65, 0, 2.13, 0, softWood, .018, wardrobe);
   box(1.48, .04, .61, 0, 2.064, .01, softWood, .008, wardrobe);
   box(1.48, .105, .61, 0, .13, .01, M.wood, .013, wardrobe);
   for (const x of [-.57, .57]) for (const z of [-.2, .2]) box(.11, .18, .11, x, .095, z, M.wood, .017, wardrobe);
   for (const x of [-.351, .351]) {
-    box(.683, 1.805, .045, x, 1.103, .309, M.wood, .009, wardrobe);
+    const leaf = new THREE.Group(); leaf.name = x < 0 ? 'Slightly unlatched wardrobe door' : 'Closed wardrobe door'; wardrobe.add(leaf);
+    box(.683, 1.805, .045, x, 1.103, .309, M.wood, .009, leaf);
     for (const [y, h] of [[.61, .7], [1.5, .8]]) {
-      box(.527, h, .012, x, y, .336, darkEdge, .008, wardrobe);
-      box(.49, h - .04, .026, x, y, .349, softWood, .01, wardrobe);
-      for (const dx of [-.27, .27]) box(.025, h + .025, .028, x + dx, y, .351, M.wood, .006, wardrobe);
-      for (const dy of [-h / 2, h / 2]) box(.55, .025, .028, x, y + dy, .351, M.wood, .006, wardrobe);
+      box(.527, h, .012, x, y, .336, darkEdge, .008, leaf);
+      box(.49, h - .04, .026, x, y, .349, softWood, .01, leaf);
+      for (const dx of [-.27, .27]) box(.025, h + .025, .028, x + dx, y, .351, M.wood, .006, leaf);
+      for (const dy of [-h / 2, h / 2]) box(.55, .025, .028, x, y + dy, .351, M.wood, .006, leaf);
     }
     const hx = x + (x < 0 ? .252 : -.252);
-    rod(point(hx, 1.025, .378), point(hx, 1.155, .378), .009, M.brass, wardrobe);
-    for (const y of [1.025, 1.155]) rod(point(hx, y, .341), point(hx, y, .378), .011, M.brass, wardrobe);
+    rod(point(hx, 1.025, .378), point(hx, 1.155, .378), .009, M.brass, leaf);
+    for (const y of [1.025, 1.155]) rod(point(hx, y, .341), point(hx, y, .378), .011, M.brass, leaf);
     for (const y of [.44, 1.1, 1.77]) box(.025, .075, .029, x + (x < 0 ? -.33 : .33), y, .34, M.brass, .006, wardrobe);
+    const hinge = x < 0 ? -.6925 : .6925;
+    for (const piece of leaf.children) { piece.position.x -= hinge; piece.position.z -= .287; }
+    leaf.position.set(hinge, 0, .287); leaf.rotation.y = x < 0 ? -.105 : 0;
   }
 
   // Writing desk: slender legs, drawer, chair, a few purposeful personal objects.
@@ -371,17 +387,20 @@ export function createRoom(scene, materials) {
   deskLeather.name = 'Worn olive leather writing pad'; deskLeather.color.set('#41443a');
   deskLeather.normalScale.set(.055, .055); deskLeather.roughness = .86;
   const deskPad = box(.61, .008, .41, .02, .809, .015, deskLeather, .02, desk);
-  const loosePaper = box(.185, .0015, .26, -.04, .815, .015, stationery(), 0, desk); loosePaper.rotation.y = .09;
-  const pen = rod(point(.04, .819, -.05), point(.13, .819, .07), .003, M.dark, desk);
   for (let i = 0; i < 3; i++) {
     const item = book(.2 + i * .012, .031 + i * .005, .28, ['#454a40', '#5d3b2d', '#736349'][i]);
-    item.position.set(-.47, .828 + i * .036, -.17); item.rotation.y = .06 - i * .07; desk.add(item);
+    item.position.set(-.47 + [0, .014, -.009][i], [.82, .8575, .90][i], -.17 + [0, .008, -.012][i]);
+    item.rotation.y = [.045, -.06, .13][i]; desk.add(item);
   }
   // Small ceramic cup with a visible inside and ring at its lip.
   const cupMat = plain('#9b9b83', .33);
-  cylinder(.042, .033, .083, .48, .851, .13, cupMat, 32, desk);
-  cylinder(.036, .031, .006, .48, .895, .13, plain('#382a1d', .25), 32, desk);
-  const mugHandle = mesh(new THREE.TorusGeometry(.027, .008, 10, 22), cupMat, .535, .852, .13, desk); mugHandle.rotation.y = Math.PI / 2;
+  const cupProfile = [[0, 0], [.030, 0], [.034, .004], [.041, .073], [.042, .080],
+    [.041, .083], [.038, .083], [.037, .079], [.031, .013], [.027, .009], [0, .009]];
+  mesh(new THREE.LatheGeometry(cupProfile.map(([r, y]) => new THREE.Vector2(r, y)), 32),
+    cupMat, .48, .8025, .13, desk);
+  const coffee = mesh(new THREE.CircleGeometry(.0364, 32), plain('#382a1d', .25), .48, .874, .13, desk);
+  coffee.rotation.x = -Math.PI / 2;
+  mesh(new THREE.TorusGeometry(.027, .008, 10, 22), cupMat, .535, .845, .13, desk);
   // Shaped joinery and a sewn cushion replace the old box-and-stick chair.
   // Its materials share existing photographs and remain local to this prop.
   const chairWood = cloneSurface(M.wood);
@@ -449,7 +468,10 @@ export function createRoom(scene, materials) {
   // Faded photographs in layered timber frames. No supernatural props or UI.
   picture(-2.974, 1.72, -1.58, .55, .73, Math.PI / 2, 1);
   picture(2.974, 1.85, 1.47, .62, .46, -Math.PI / 2, 2);
-  return { colliders, bedMetrics, chairMetrics, lampPosition: new THREE.Vector3(bedsideX, 1.075, lampZ),
+  const livedIn = createLivedInDetails(M); room.add(livedIn.group);
+  const surfaceWear = createSurfaceWear(); room.add(surfaceWear.mesh);
+  const livedInMetrics = { ...livedIn.stats, surfaceWear: surfaceWear.stats };
+  return { colliders, bedMetrics, chairMetrics, livedInMetrics, lampPosition: new THREE.Vector3(bedsideX, 1.075, lampZ),
     lampMaterials: { shade, bulb: filament.material },
     windowPosition: new THREE.Vector3(.4, 1.775, -3.18), windowGlass: glass,
     windowBounds: { position: glass.position.clone(), width: 1.54, height: 1.45 }, updates: [] };
@@ -479,38 +501,9 @@ export function createRoom(scene, materials) {
     for (let i = 0; i < 3; i++) box(.012, .0015, depth * .8, -width / 2 + .014, height / 2 + .003, 0, M.brass, 0, group);
     return group;
   }
-  function stationery() {
-    const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 720;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#c8bfa6'; ctx.fillRect(0, 0, 512, 720);
-    const edge = ctx.createLinearGradient(0, 0, 512, 0);
-    edge.addColorStop(0, 'rgba(113,96,65,.14)'); edge.addColorStop(.04, 'rgba(113,96,65,0)');
-    edge.addColorStop(.95, 'rgba(113,96,65,0)'); edge.addColorStop(1, 'rgba(113,96,65,.12)');
-    ctx.fillStyle = edge; ctx.fillRect(0, 0, 512, 720);
-    ctx.strokeStyle = 'rgba(98,106,101,.17)'; ctx.lineWidth = 1;
-    for (let y = 142; y < 664; y += 41) {
-      ctx.beginPath(); ctx.moveTo(34, y); ctx.lineTo(478, y); ctx.stroke();
-    }
-    ctx.fillStyle = 'rgba(53,57,48,.58)'; ctx.font = 'italic 22px Georgia, serif';
-    ctx.fillText('Lembrar de comprar', 48, 100);
-    ctx.font = 'italic 20px Georgia, serif';
-    for (const [line, label] of ['café', 'pilhas', 'lâmpada 40 W', 'sabão'].entries()) {
-      ctx.fillText(label, 62 + line % 2 * 4, 177 + line * 41);
-      ctx.beginPath(); ctx.arc(46, 169 + line * 41, 2, 0, Math.PI * 2); ctx.fill();
-    }
-    // A slight fold and a dried cup ring give the existing small prop scale.
-    ctx.strokeStyle = 'rgba(100,84,55,.08)'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(377, 546, 74, .18, Math.PI * 1.82); ctx.stroke();
-    ctx.strokeStyle = 'rgba(82,76,58,.06)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(257, 0); ctx.lineTo(253, 720); ctx.stroke();
-    const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = Math.min(4, M.floor.map?.anisotropy || 4);
-    const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 1, color: '#dfd8c4' });
-    material.name = 'Used cream notepaper with an ordinary shopping list';
-    return material;
-  }
   function picture(x, y, z, width, height, angle, seed) {
-    const group = new THREE.Group(); group.position.set(x, y, z); group.rotation.y = angle; room.add(group);
+    const group = new THREE.Group(); group.position.set(x, y, z); group.rotation.y = angle;
+    group.rotation.z = seed === 1 ? -.012 : .009; room.add(group);
     box(width, height, .035, 0, 0, 0, M.dark, .012, group);
     box(width - .033, height - .033, .011, 0, 0, .022, M.brass, .005, group);
     box(width - .05, height - .05, .012, 0, 0, .029, M.wood, .004, group);

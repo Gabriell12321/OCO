@@ -46,13 +46,21 @@ for (let u = -1.25; u <= 1.25; u += .025) for (let v = -.82; v <= 1.47; v += .02
     assert.ok(distance >= -.0001, 'Lower drape clears the rounded timber rail');
   }
 }
+let minimumFoldGap = Infinity, maximumFoldGap = -Infinity;
 for (let x = -.9; x <= .9; x += .05) {
   const upper = bed.foldSample(x, .84), lower = bed.foldSample(x, 1);
   assert.ok(upper.y - lower.y > .010 && upper.y - lower.y < .020, 'Compressed return remains a thin 10–20 mm fabric layer');
-  const support = bed.sample(x, lower.z - cz);
-  assert.ok(lower.y - support.y >= .0029 && lower.y - support.y <= .0041, 'Fold underside rests within 4 mm of its support');
-  assert.ok(upper.y - support.y < .024, 'Fold cannot become a floating raised cord');
-  for (let z = .76; z < 1.40; z += .035) assert.ok(bed.throwSample(x, z).y - bed.sample(x, z).y >= .0139, 'Throw remains separated from underlying duvet');
+  const support = new THREE.Raycaster(new THREE.Vector3(lower.x, 1.2, lower.z), new THREE.Vector3(0, -1, 0), 0, 1).intersectObject(duvet, false)[0];
+  assert.ok(support, 'The pulled fold remains over connected duvet geometry');
+  const gap = lower.y - support.point.y;
+  minimumFoldGap = Math.min(minimumFoldGap, gap); maximumFoldGap = Math.max(maximumFoldGap, gap);
+  assert.ok(gap >= -.0005 && gap <= .007, 'Fold underside remains supported after the asymmetric pull');
+  assert.ok(upper.y - support.point.y < .027, 'Fold cannot become a floating raised cord');
+  for (let z = .76; z < 1.40; z += .035) {
+    const [u, v] = bed.throwRest(x, z);
+    assert.ok(v < 1.47 && Math.abs(u) < 1.25, 'Skewed throw stays on the duvet support domain');
+    assert.ok(bed.throwSample(x, z).y - bed.sample(u, v).y >= .0139, 'Throw remains separated from the actual underlying duvet');
+  }
 }
 
 // Pillow panels must be solid in silhouette and have a real depressed top,
@@ -65,4 +73,29 @@ for (const pillow of pillows) {
   assert.ok(bounds.max.z - bounds.min.z > .44 && bounds.max.z - bounds.min.z < .49);
   assert.ok(bounds.max.y - bounds.min.y > .12 && bounds.max.y - bounds.min.y < .17);
 }
-console.log(JSON.stringify({ ...bed.metrics, maximumCreaseDeviationMm: Number((maximumDeviation * 1000).toFixed(3)), minimumRailClearanceMm: Number((minimumClearance * 1000).toFixed(3)) }));
+const [leftPillow, rightPillow] = pillows;
+assert.ok(rightPillow.parent.position.z - leftPillow.parent.position.z > .14, 'The used right pillow is visibly pulled towards the foot');
+assert.ok(rightPillow.parent.rotation.y - leftPillow.parent.rotation.y > .23, 'Pillows no longer share a matching placement');
+const leftEdge = bed.sample(-.65, -.82), rightEdge = bed.sample(.65, -.82);
+assert.ok(rightEdge.z - leftEdge.z > .22, 'Right duvet head edge exposes a visible area of the real sheet');
+const sheetProbe = x => new THREE.Raycaster(new THREE.Vector3(cx + x, 1.2, cz - .70), new THREE.Vector3(0, -1, 0), 0, .8).intersectObject(duvet, false);
+assert.equal(sheetProbe(.65).length, 0, 'The opened right area is uncovered sheet, not a second fake fold on top of the duvet');
+assert.ok(sheetProbe(-.65).length > 0, 'The orderly left sleeping place remains covered');
+const leftThrow = bed.throwSample(-.65, .76), rightThrow = bed.throwSample(.65, .76);
+assert.ok(rightThrow.z - leftThrow.z > .15, 'Foot blanket has one pulled corner and a visibly diagonal top edge');
+
+// Check actual rendered underside vertices against their sheet/duvet support.
+// The selected triangles face down before each pillow's world transform.
+let minimumPillowGap = Infinity;
+for (const pillow of pillows) {
+  const positions = pillow.geometry.attributes.position, normal = pillow.geometry.attributes.normal;
+  let contactGap = Infinity;
+  for (let i = 0; i < positions.count; i++) {
+    if (normal.getY(i) >= -.6 || positions.getY(i) > -.020) continue;
+    const p = new THREE.Vector3().fromBufferAttribute(positions, i).applyMatrix4(pillow.matrixWorld);
+    const gap = p.y - bed.supportHeight(p.x - cx, p.z - cz);
+    minimumPillowGap = Math.min(minimumPillowGap, gap); contactGap = Math.min(contactGap, gap);
+  }
+  assert.ok(contactGap >= -.002 && contactGap < .004, `Each pillow contacts its support without cutting through it: ${contactGap}`);
+}
+console.log(JSON.stringify({ ...bed.metrics, maximumCreaseDeviationMm: Number((maximumDeviation * 1000).toFixed(3)), minimumRailClearanceMm: Number((minimumClearance * 1000).toFixed(3)), foldGapMm: [minimumFoldGap, maximumFoldGap].map(value => Number((value * 1000).toFixed(3))), minimumPillowGapMm: Number((minimumPillowGap * 1000).toFixed(3)), openedRightCoverCm: Number(((rightEdge.z - leftEdge.z) * 100).toFixed(1)), throwSkewCm: Number(((rightThrow.z - leftThrow.z) * 100).toFixed(1)) }));
