@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import { sampleStormSignal } from './storm.js';
+export { sampleStormSignal, stormEventTime, STORM_FIRST_FLASH_TIME, STORM_FLASH_ATTACK, STORM_FLASH_DURATION } from './storm.js';
 
 export const LAMP_SHADOW = Object.freeze({ bias: -.0005, normalBias: .012, radius: 4.2 });
 export const LAMP_SHADOW_SIZE = 1024;
@@ -31,7 +33,7 @@ export function sampleLampSignal(time, result = {}) {
 
 /** Fixed emitters keep all seven room shadow views cached. Only light and
  * emissive uniforms change, together, when the electrical contact falters. */
-export function createRoomLighting(scene, room, { onFlicker = () => {} } = {}) {
+export function createRoomLighting(scene, room, { onFlicker = () => {}, onThunder = () => {} } = {}) {
   RectAreaLightUniformsLib.init();
   const owned = [], full = [], efficient = [], warm = [];
   const add = light => { owned.push(light); scene.add(light); return light; };
@@ -59,10 +61,20 @@ export function createRoomLighting(scene, room, { onFlicker = () => {} } = {}) {
   lampFill.position.copy(bounce.position); efficient.push(lampFill); warm.push([lampFill, lampFill.intensity]);
   const coolBounce = add(new THREE.PointLight(0x9db6cd, .32, 6, 2));
   coolBounce.position.set(1.1, 1.9, -.3);
+  // The existing exterior directional emitter already has the room opening
+  // and mullions in its cached depth map. Raising it gives a red shaft with
+  // real frame shadows, rather than tinting the whole screen or adding a map.
+  const stormLights = [[moon, 4.2], [windowLight, 3.3], [windowFill, 3], [coolBounce, .42]]
+    .map(([light, extra]) => ({ light, color: light.color.clone(), intensity: light.intensity, extra }));
+  const stormRed = new THREE.Color('#ff1836');
+  const glassMaterial = room.windowGlass?.material;
+  const glassEmission = glassMaterial?.emissive?.clone();
+  const glassStormEmission = new THREE.Color(.45, .008, .016);
   const emissives = Object.values(room.lampMaterials || {}).map(material => [material, material.emissiveIntensity]);
-  const sample = {};
+  const sample = {}, storm = {};
   let lastEvent = -1, gain = 1, events = 0, time = 0;
-  function update(seconds, { lampOverride = null, emitEvents = true } = {}) {
+  let lastThunderEvent = -1, thunderGain = 0, thunderEvents = 0;
+  function update(seconds, { lampOverride = null, stormOverride = null, emitEvents = true } = {}) {
     time = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
     sampleLampSignal(time, sample);
     gain = lampOverride === null ? sample.gain : clamp(Number(lampOverride) || 0);
@@ -72,16 +84,31 @@ export function createRoomLighting(scene, room, { onFlicker = () => {} } = {}) {
     lastEvent = sample.event;
     for (const [light, intensity] of warm) light.intensity = intensity * gain;
     for (const [material, intensity] of emissives) material.emissiveIntensity = intensity * gain;
+    sampleStormSignal(time, storm);
+    thunderGain = stormOverride === null ? storm.gain : clamp(Number(stormOverride) || 0);
+    if (emitEvents && stormOverride === null && storm.event >= 0 && storm.event !== lastThunderEvent) {
+      thunderEvents++; onThunder(storm.strength);
+    }
+    lastThunderEvent = storm.event;
+    for (const source of stormLights) {
+      source.light.color.copy(source.color).lerp(stormRed, thunderGain);
+      source.light.intensity = source.intensity + source.extra * thunderGain;
+    }
+    // A faint local wet-glass response locates the flash outside. Actual room
+    // illumination still comes from the fixed emitters above, not this pane.
+    if (glassEmission) glassMaterial.emissive.copy(glassEmission).lerp(glassStormEmission, thunderGain);
     return gain;
   }
   return {
     shadowLights: [moon, lamp], update,
+    getStormLevel: () => thunderGain,
     setQuality(quality) {
       const qualityMode = quality === 'quality';
       full.forEach(light => { light.visible = qualityMode; });
       efficient.forEach(light => { light.visible = !qualityMode; });
     },
     snapshot: () => ({ time, lampGain: gain, flickerEvents: events, event: sample.event ?? -1,
+      thunderGain, thunderEvents, thunderEvent: storm.event ?? -1, staticShadowPassesPerThunder: 0,
       staticShadowPassesPerFlicker: 0, emitters: owned.filter(light => light.isLight).length,
       shadeGain: gain, lampIntensity: lamp.intensity }),
     dispose() { for (const object of owned) { object.removeFromParent(); object.dispose?.(); } },

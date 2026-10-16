@@ -75,6 +75,12 @@ rain.setTime(NaN); rain.update(Infinity);
 assert.equal(rain.snapshot().time, 12.5);
 rain.setLampLevel(-1); assert.equal(rain.snapshot().lamp, 0);
 rain.setLampLevel(2); assert.equal(rain.snapshot().lamp, 1.5);
+rain.setStormLevel(1);
+assert.equal(streaks.material.uniforms.uStorm.value, 1);
+assert.equal(drops.material.uniforms.uStorm.value, 1, 'Rain and wet-glass glints share the exact flash level');
+rain.setStormLevel(-1); assert.equal(rain.snapshot().storm, 0);
+rain.setStormLevel(5); assert.equal(rain.snapshot().storm, 1);
+rain.setStormLevel(NaN); assert.equal(rain.snapshot().storm, 1);
 rain.setEnabled(false); assert.equal(rain.group.visible, false); assert.equal(rain.snapshot().drawCalls, 0);
 rain.setEnabled(true); assert.equal(rain.group.visible, true);
 

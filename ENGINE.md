@@ -43,15 +43,25 @@ determinística de falhas elétricas. Um único sinal altera luz direta,
 preenchimento, emissivos e reflexos na água; o evento de início dispara o som.
 As intensidades mudam sem invalidar os mapas estáticos de sombra.
 
+`dist/engine/storm.js` fornece o relógio da tempestade: primeiro evento aos
+10 segundos e intervalos posteriores de 27 a 39 segundos. Um envelope com
+ataque de 150 ms e cauda de 900 ms controla o clarão vermelho. O início do
+mesmo evento aciona o trovão. A luz externa usa o mapa de sombra da janela
+já calculado; preenchimento, vidro e gotas seguem o mesmo ganho. Nenhum
+emissor, mapa de sombra ou passe de tela é acrescentado.
+
 `dist/weather/rain.js` usa dois lotes instanciados e anima o movimento no
 vertex shader. Os filetes ficam fora da janela; gotas e escorrimentos são
 recortados no vidro e ocluídos pelas molduras. Não há simulação por gota na
 CPU, cópia da imagem nem novo passe de refração.
 
-`dist/audio/room-audio.js` gera os buffers uma vez, após interação do usuário,
-e mantém duas fontes contínuas mais até quatro efeitos curtos. A espacialização
-acompanha a câmera, o áudio respeita mute/foco/pausa e a medição de sinal só
-aloca um analisador temporário quando solicitada pelo diagnóstico.
+`dist/audio/room-audio.js` pré-carrega os arquivos de chuva e trovão locais
+sem iniciar áudio. Após interação do usuário, decodifica e prepara os
+buffers uma vez. Mantém duas fontes contínuas, até quatro estalos curtos e
+um trovão. A espacialização acompanha a câmera, o áudio respeita
+mute/foco/pausa e a medição de sinal só aloca um analisador temporário quando
+solicitada pelo diagnóstico. Uma alternativa procedural cobre falha de
+leitura ou decodificação; o snapshot identifica a fonte em uso.
 
 `dist/bedroom/bed.js` gera os tecidos em metros: costuras, abas dos travesseiros,
 dobras de tensão, bainhas e a borda retornada do edredom. A densidade da malha

@@ -32,6 +32,7 @@ const streakVertex = /* glsl */`
 `;
 const streakFragment = /* glsl */`
   uniform float uIntensity;
+  uniform float uStorm;
   varying vec2 vUv;
   varying float vOpacity;
   void main() {
@@ -41,7 +42,8 @@ const streakFragment = /* glsl */`
     float tip = pow(max(0.0, 1.0 - q.y*q.y), .7);
     float alpha = core * core * tip * vOpacity * uIntensity;
     if (alpha < .003) discard;
-    gl_FragColor = vec4(vec3(.26, .36, .44), alpha);
+    vec3 color = mix(vec3(.26, .36, .44), vec3(.95, .035, .075), uStorm);
+    gl_FragColor = vec4(color, alpha * (1.0 + uStorm * .25));
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -74,6 +76,7 @@ const dropletVertex = /* glsl */`
 const dropletFragment = /* glsl */`
   uniform vec2 uPane;
   uniform float uLamp;
+  uniform float uStorm;
   uniform float uIntensity;
   varying vec2 vLocal;
   varying vec2 vPanePosition;
@@ -105,6 +108,7 @@ const dropletFragment = /* glsl */`
     float alpha = (body * .065 + edge * .30 + trail * .12 + glint) * uIntensity;
     vec3 color = mix(vec3(.014, .023, .029), vec3(.35, .48, .56), clamp(glint * 3.6 + trail * .28, 0.0, 1.0));
     color += vec3(.38, .21, .075) * warm * uLamp;
+    color = mix(color, color * vec3(1.4, .10, .16) + vec3(.55, .012, .035) * (cool + trail * .2), uStorm);
     // Sparse new impacts spread for 90 ms and settle into a bead. They never
     // make screen-sized flashes or spawn droplets on the room side.
     if (vShape.y > 1.5) {
@@ -137,7 +141,7 @@ export function createWindowRain(scene, {
   const random = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
   const group = new THREE.Group(); group.name = 'Exterior rain and wet window'; group.position.copy(windowPosition);
   group.userData.dynamic = true; group.userData.noStaticBatch = true;
-  const uniformTime = { value: 0 }, intensity = { value: 1 }, lamp = { value: 1 };
+  const uniformTime = { value: 0 }, intensity = { value: 1 }, lamp = { value: 1 }, storm = { value: 0 };
   const pane = { value: new THREE.Vector2(width, height) };
   const streakGeometry = makeQuad(), dropletGeometry = makeQuad();
   const rainData = new Float32Array(RAIN_PROFILES.quality.streaks * 4), shapes = new Float32Array(rainData.length);
@@ -168,9 +172,9 @@ export function createWindowRain(scene, {
   dropletGeometry.boundingBox = new THREE.Box3(new THREE.Vector3(-width / 2 - .02, -height / 2 - .3, -.005),
     new THREE.Vector3(width / 2 + .02, height / 2 + .3, -.003));
   dropletGeometry.boundingSphere = dropletGeometry.boundingBox.getBoundingSphere(new THREE.Sphere());
-  const streakMaterial = new THREE.ShaderMaterial({ uniforms: { uTime: uniformTime, uIntensity: intensity },
+  const streakMaterial = new THREE.ShaderMaterial({ uniforms: { uTime: uniformTime, uIntensity: intensity, uStorm: storm },
     vertexShader: streakVertex, fragmentShader: streakFragment, transparent: true, depthWrite: false, side: THREE.FrontSide });
-  const dropletMaterial = new THREE.ShaderMaterial({ uniforms: { uTime: uniformTime, uPane: pane, uLamp: lamp, uIntensity: intensity },
+  const dropletMaterial = new THREE.ShaderMaterial({ uniforms: { uTime: uniformTime, uPane: pane, uLamp: lamp, uIntensity: intensity, uStorm: storm },
     vertexShader: dropletVertex, fragmentShader: dropletFragment, transparent: true, depthWrite: false, side: THREE.FrontSide });
   const streaks = new THREE.Mesh(streakGeometry, streakMaterial), droplets = new THREE.Mesh(dropletGeometry, dropletMaterial);
   streaks.name = 'Rain beyond the glass'; droplets.name = 'Beads impacts and rivulets on exterior glass';
@@ -195,12 +199,13 @@ export function createWindowRain(scene, {
     update(elapsed) { if (!disposed) setTime(elapsed); },
     setTime,
     setLampLevel(value) { if (Number.isFinite(value)) lamp.value = THREE.MathUtils.clamp(value, 0, 1.5); },
+    setStormLevel(value) { if (Number.isFinite(value)) storm.value = THREE.MathUtils.clamp(value, 0, 1); },
     setQuality,
     setEnabled(value) { enabled = Boolean(value); group.visible = enabled && !disposed; },
     snapshot() { return { enabled, quality, time: uniformTime.value, streaks: streakGeometry.instanceCount,
       drops: dropletGeometry.instanceCount, drawCalls: enabled && !disposed ? 2 : 0,
       triangles: (streakGeometry.instanceCount + dropletGeometry.instanceCount) * 2,
-      lamp: lamp.value, shadowPasses: 0, textureUploadsPerFrame: 0, disposed }; },
+      lamp: lamp.value, storm: storm.value, shadowPasses: 0, textureUploadsPerFrame: 0, disposed }; },
     dispose() {
       if (disposed) return;
       disposed = true; group.removeFromParent();

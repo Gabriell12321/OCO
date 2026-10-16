@@ -23,7 +23,7 @@ let renderer, controls, room, scene, camera, frameHandle = 0;
 let playerShadow, gpuTimer;
 let pipeline, staticSceneStats;
 let lighting, rain, roomAudio;
-const atmosphere = { time: 0, frozen: false, lamp: null, rain: true };
+const atmosphere = { time: 0, frozen: false, lamp: null, thunder: null, rain: true };
 const resolutionGovernor = new ResolutionGovernor();
 let diagnosticResolutionLock = false;
 const diagnosticFabricState = new Map();
@@ -137,7 +137,7 @@ function getPerformanceSnapshot() {
   const stats = monitor.snapshot();
   const width = renderer?.domElement.width || 0, height = renderer?.domElement.height || 0;
   return {
-    ...stats, version: '0.8.0', ready, quality, qualityLabel: PROFILES[quality].label,
+    ...stats, version: '0.9.0', ready, quality, qualityLabel: PROFILES[quality].label,
     character: false, firstPersonOnly: true,
     renderer: 'WebGL2', pathTracing: false, shadows: 'cached',
     engine: 'OCO', engineBackend: 'Three.js / WebGL2', engineVersion: '0.1',
@@ -209,8 +209,10 @@ function frame(now) {
   renderer.info.reset();
   controls.update(dt);
   if (!atmosphere.frozen) atmosphere.time += dt;
-  const lampGain = lighting.update(atmosphere.time, { lampOverride: atmosphere.lamp, emitEvents: !atmosphere.frozen });
-  rain.setLampLevel(lampGain); rain.update(atmosphere.time, dt);
+  const lampGain = lighting.update(atmosphere.time, { lampOverride: atmosphere.lamp,
+    stormOverride: atmosphere.thunder, emitEvents: !atmosphere.frozen });
+  rain.setLampLevel(lampGain); rain.setStormLevel(lighting.getStormLevel());
+  rain.update(atmosphere.time, dt);
   roomAudio.update(camera, dt);
   for (const update of room.updates || []) update(elapsed, dt);
   playerShadow.update(controls, dt, now);
@@ -220,7 +222,7 @@ function frame(now) {
 }
 
 window.Quarto01 = {
-  version: '0.8.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
+  version: '0.9.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
   get ready() { return ready; }, get quality() { return quality; }, get fps() { return monitor.fps; },
   get frameTimes() { return monitor.frameTimes.slice(); },
   get renderStats() { return renderer ? { ...renderer.info.render } : {}; },
@@ -234,9 +236,11 @@ window.Quarto01 = {
     if (Number.isFinite(options.time)) atmosphere.time = Math.max(0, options.time);
     if (typeof options.frozen === 'boolean') atmosphere.frozen = options.frozen;
     if (options.lamp === null || Number.isFinite(options.lamp)) atmosphere.lamp = options.lamp === null ? null : THREE.MathUtils.clamp(options.lamp, 0, 1);
+    if (options.thunder === null || Number.isFinite(options.thunder)) atmosphere.thunder = options.thunder === null ? null : THREE.MathUtils.clamp(options.thunder, 0, 1);
     if (typeof options.rain === 'boolean') { atmosphere.rain = options.rain; rain.setEnabled(options.rain); }
-    const gain = lighting.update(atmosphere.time, { lampOverride: atmosphere.lamp, emitEvents: false });
-    rain.setLampLevel(gain); rain.setTime(atmosphere.time);
+    const gain = lighting.update(atmosphere.time, { lampOverride: atmosphere.lamp,
+      stormOverride: atmosphere.thunder, emitEvents: false });
+    rain.setLampLevel(gain); rain.setStormLevel(lighting.getStormLevel()); rain.setTime(atmosphere.time);
     return true;
   },
   diagnosticAudio: (action, value) => {
@@ -331,8 +335,13 @@ async function init() {
   room = createRoom(scene, materials); simplifyMaterials();
   staticSceneStats = compileStaticScene(scene);
   roomAudio = createRoomAudio({ canvas, button: document.getElementById('soundBtn'),
-    windowPosition: room.windowPosition, lampPosition: room.lampPosition });
-  lighting = createRoomLighting(scene, room, { onFlicker: strength => roomAudio.triggerFlicker(strength) });
+    windowPosition: room.windowPosition, lampPosition: room.lampPosition,
+    rainUrl: './assets/audio/rain-window.mp3', thunderUrl: './assets/audio/distant-thunder.mp3' });
+  const audioPreload = roomAudio.preload();
+  lighting = createRoomLighting(scene, room, {
+    onFlicker: strength => roomAudio.triggerFlicker(strength),
+    onThunder: strength => roomAudio.triggerThunder(strength),
+  });
   shadowLights = lighting.shadowLights;
   rain = createWindowRain(scene, { windowPosition: room.windowBounds.position,
     width: room.windowBounds.width, height: room.windowBounds.height, glass: room.windowGlass });
@@ -348,6 +357,7 @@ async function init() {
   cacheShadows();
   playerShadow.update(controls, 0, performance.now(), true);
   await renderer.compileAsync(scene, camera);
+  await audioPreload;
   renderRoom();
   qualityButton?.addEventListener('click', () => {
     const ids = Object.keys(PROFILES); setQuality(ids[(ids.indexOf(quality) + 1) % ids.length]);

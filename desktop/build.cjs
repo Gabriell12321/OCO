@@ -79,10 +79,11 @@ async function build() {
   for (const name of firstPersonOnly ? ['ASSETS.md', 'SHADOW-ASSET.md'] : ['ASSETS.md', 'CHARACTER.md', 'SHADOW-ASSET.md']) {
     if (fs.existsSync(path.join(projectRoot, name))) fs.copyFileSync(path.join(projectRoot, name), path.join(credits, name));
   }
+  const documentation = path.join(appRoot, 'DOCUMENTACAO');
+  removeBuildOutput(documentation);
+  fs.mkdirSync(documentation, { recursive: true });
   for (const name of ['ENGINE.md', 'VALIDACAO.md', `ATUALIZACAO-${appVersion}.md`]) {
     if (fs.existsSync(path.join(projectRoot, name))) {
-      const documentation = path.join(appRoot, 'DOCUMENTACAO');
-      fs.mkdirSync(documentation, { recursive: true });
       fs.copyFileSync(path.join(projectRoot, name), path.join(documentation, name));
     }
   }

@@ -1,5 +1,5 @@
-// Original, deterministic room sound. No network assets, audio worklet or frame-time synthesis.
-export const ROOM_AUDIO_LIMITS = Object.freeze({ loops: 2, voices: 4, sampleRate: 24000 });
+// Local recordings with an original deterministic fallback. No frame-time synthesis.
+export const ROOM_AUDIO_LIMITS = Object.freeze({ loops: 2, voices: 4, thunder: 1, sampleRate: 24000 });
 
 function randomSequence(seed) {
   let value = seed >>> 0;
@@ -9,53 +9,56 @@ function randomSequence(seed) {
   };
 }
 
-function sealLoop(samples, sampleRate) {
-  // Blend the end into the beginning; the final sample meets the first without a click.
-  const count = Math.min(Math.round(sampleRate * .12), samples.length >> 1);
+export function createSeamlessLoop(samples, sampleRate, blendSeconds = .6) {
+  // Fold the tail into the beginning and shorten the cycle by the overlap.
+  // The wrap then crosses two ORIGINAL adjacent samples, without a DC ramp.
+  const count = Math.min(Math.round(sampleRate * blendSeconds), samples.length >> 1);
+  if (count < 2) return samples.slice();
+  const output = new Float32Array(samples.length - count);
   for (let i = 0; i < count; i++) {
-    const t = (i + 1) / count;
-    const weight = t * t * (3 - 2 * t);
-    const index = samples.length - count + i;
-    samples[index] = samples[index] * (1 - weight) + samples[i] * weight;
+    const angle = i / (count - 1) * Math.PI * .5;
+    output[i] = samples[samples.length - count + i] * Math.cos(angle) + samples[i] * Math.sin(angle);
   }
-  const endpoint = samples[0];
-  const delta = samples.at(-1) - endpoint;
-  for (let i = 0; i < count; i++) samples[samples.length - count + i] -= delta * ((i + 1) / count) ** 2;
+  output.set(samples.subarray(count, samples.length - count), count);
+  return output;
 }
 
 export function generateRoomAudioPCM(sampleRate = ROOM_AUDIO_LIMITS.sampleRate, seed = 801) {
   if (!Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 96000) throw new RangeError('Invalid audio sample rate');
   const random = randomSequence(seed);
-  const rain = new Float32Array(Math.round(sampleRate * 8));
+  let rain = new Float32Array(Math.round(sampleRate * 24));
   let low = 0, middle = 0;
+  let gust = .85, gustTarget = .85, nextGust = 0;
   for (let i = 0; i < rain.length; i++) {
     const white = random() * 2 - 1;
     low += .015 * (white - low);
     middle += .23 * (white - middle);
-    const time = i / sampleRate;
-    const gust = .82 + .1 * Math.sin(time * Math.PI / 4) + .08 * Math.sin(time * Math.PI / 2);
+    if (i >= nextGust) { gustTarget = .64 + random() * .3; nextGust = i + Math.round(sampleRate * (.7 + random() * 2.4)); }
+    gust += (gustTarget - gust) / (sampleRate * .65);
     rain[i] = (.3 * middle + .45 * low + .025 * white) * gust;
   }
-  sealLoop(rain, sampleRate);
+  rain = createSeamlessLoop(rain, sampleRate);
 
-  const glass = new Float32Array(Math.round(sampleRate * 13));
+  let glass = new Float32Array(Math.round(sampleRate * 29));
   let hit = .17;
-  while (hit < 12.8) {
+  while (hit < 28.7) {
     const start = Math.round(hit * sampleRate);
-    const length = Math.round((.018 + random() * .055) * sampleRate);
-    const pitch = 950 + random() * 1550;
-    const amplitude = .07 + random() ** 2 * .13;
-    let noise = 0;
+    const length = Math.round((.035 + random() * .075) * sampleRate);
+    const amplitude = .045 + random() ** 2 * .105;
+    const decayRate = 45 + random() * 75;
+    let noise = 0, slow = 0;
     for (let j = 0; j < length && start + j < glass.length; j++) {
       const t = j / sampleRate;
-      const attack = Math.min(1, j / (sampleRate * .0008));
-      const decay = Math.exp(-t * (85 + pitch / 100));
-      noise += .48 * (random() * 2 - 1 - noise);
-      glass[start + j] += amplitude * attack * decay * (.62 * noise + .32 * Math.sin(2 * Math.PI * pitch * t));
+      const attack = Math.min(1, j / (sampleRate * .0015));
+      const decay = Math.exp(-t * decayRate) * Math.min(1, (length - j) / (sampleRate * .008));
+      noise += .42 * (random() * 2 - 1 - noise);
+      slow += .045 * (noise - slow);
+      // A short, broad splash; no pitched sinusoid or repeated metallic ping.
+      glass[start + j] += amplitude * attack * decay * (noise - slow * .35);
     }
-    hit += .055 + random() ** 1.7 * .28;
+    hit += .075 + random() ** 1.7 * .39;
   }
-  sealLoop(glass, sampleRate);
+  glass = createSeamlessLoop(glass, sampleRate);
 
   const flickers = [0, 1, 2].map(variant => {
     const duration = .15 + variant * .032;
@@ -73,7 +76,46 @@ export function generateRoomAudioPCM(sampleRate = ROOM_AUDIO_LIMITS.sampleRate, 
     samples[0] = samples[samples.length - 1] = 0;
     return samples;
   });
-  return { sampleRate, rain, glass, flickers };
+  const thunder = new Float32Array(Math.round(sampleRate * 6.2));
+  const rolls = Array.from({ length: 5 }, (_, i) => ({
+    time: .22 + i * .85 + random() * .5, width: .24 + random() * .38, strength: .2 + random() * .32
+  }));
+  let sub = 0, rumble = 0, crack = 0, peak = 0;
+  const subCoefficient = 1 - Math.exp(-2 * Math.PI * 58 / sampleRate);
+  const rumbleCoefficient = 1 - Math.exp(-2 * Math.PI * 210 / sampleRate);
+  const crackCoefficient = 1 - Math.exp(-2 * Math.PI * 1150 / sampleRate);
+  for (let i = 0; i < thunder.length; i++) {
+    const t = i / sampleRate, white = random() * 2 - 1;
+    sub += subCoefficient * (white - sub);
+    rumble += rumbleCoefficient * (white - rumble);
+    crack += crackCoefficient * (white - crack);
+    let envelope = .85 * Math.exp(-t / 1.65);
+    for (const roll of rolls) envelope += roll.strength * Math.exp(-(((t - roll.time) / roll.width) ** 2));
+    const attack = Math.min(1, t / .028), release = Math.min(1, (6.2 - t) / .9);
+    thunder[i] = attack * release * envelope * (sub * 2.1 + rumble * .85 + crack * .32 * Math.exp(-t / .4));
+    peak = Math.max(peak, Math.abs(thunder[i]));
+  }
+  for (let i = 0; i < thunder.length; i++) thunder[i] *= .64 / Math.max(peak, .001);
+  thunder[0] = thunder[thunder.length - 1] = 0;
+  return { sampleRate, rain, glass, flickers, thunder };
+}
+
+export function findThunderRange(channels, sampleRate) {
+  const length = channels[0]?.length || 0, hop = Math.max(1, Math.round(sampleRate * .01));
+  const energies = new Float32Array(Math.ceil(length / hop));
+  let maximum = 0;
+  for (let frame = 0; frame < energies.length; frame++) {
+    const start = frame * hop, end = Math.min(length, start + hop);
+    let sum = 0;
+    for (const signal of channels) for (let i = start; i < end; i++) sum += signal[i] ** 2;
+    energies[frame] = Math.sqrt(sum / ((end - start) * channels.length));
+    maximum = Math.max(maximum, energies[frame]);
+  }
+  const threshold = Math.max(.0015, maximum * .1);
+  const onset = Math.max(0, energies.findIndex(value => value >= threshold)) * hop;
+  const start = Math.max(0, onset - hop);
+  return { start, end: Math.min(length, start + Math.round(sampleRate * 7)), onset,
+    threshold, peakWindowRms: maximum };
 }
 
 function point(position, fallback) {
@@ -89,7 +131,7 @@ function ramp(parameter, value, time, duration = .04) {
   parameter.linearRampToValueAtTime(value, time + duration);
 }
 
-export function createRoomAudio({ canvas, button, windowPosition, lampPosition } = {}) {
+export function createRoomAudio({ canvas, button, windowPosition, lampPosition, rainUrl = null, thunderUrl = null } = {}) {
   const page = globalThis.document;
   const host = globalThis.window;
   let context = null, master = null, compressor = null, windowPanner = null, lampPanner = null;
@@ -97,6 +139,13 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
   let focused = page?.hasFocus?.() ?? true;
   let suspendTimer = null, meterPromise = null;
   let listenerElapsed = 1, lastFlicker = -Infinity, flickerNumber = 0;
+  let thunderNumber = 0, activeThunder = null, thunderFilter = null;
+  let preloadPromise = null, playbackPromise = null, decodedBytes = 0;
+  let thunderTrimStart = 0, thunderDetectedOnset = 0, thunderAssetDuration = 0;
+  let thunderAttackRms = 0, thunderAttackPeak = 0;
+  const encoded = { rain: null, thunder: null };
+  const assetSources = { rain: 'procedural-fallback', thunder: 'procedural-fallback' };
+  const assetErrors = {};
   const lastListener = new Float64Array(7).fill(Infinity);
   let lastError = null, generatedBytes = 0;
   const loops = [], voices = new Set(), nodes = [], listeners = [];
@@ -107,12 +156,34 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
   const inBackground = () => Boolean(page?.hidden || !focused);
   const shouldPlay = () => unlocked && !muted && !paused && !inBackground() && !disposed;
 
+  function preload() {
+    if (preloadPromise) return preloadPromise;
+    preloadPromise = Promise.all(['rain', 'thunder'].map(async kind => {
+      const url = kind === 'rain' ? rainUrl : thunderUrl;
+      if (!url || disposed) return false;
+      const abort = new AbortController(), timeout = setTimeout(() => abort.abort(), 4000);
+      try {
+        const response = await fetch(url, { signal: abort.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const bytes = await response.arrayBuffer();
+        if (!bytes.byteLength || bytes.byteLength > 12 * 1024 * 1024) throw new Error('Invalid audio asset size');
+        if (disposed) return false;
+        encoded[kind] = bytes;
+        return true;
+      } catch (error) {
+        assetErrors[kind] = error?.name || 'AudioAssetError';
+        return false;
+      } finally { clearTimeout(timeout); }
+    })).then(([rain, thunder]) => ({ rain, thunder }));
+    return preloadPromise;
+  }
+
   function updateButton() {
     if (!button) return;
     const active = unlocked && !muted;
     button.dataset.sound = active ? 'on' : 'off';
     button.setAttribute('aria-pressed', String(active));
-    button.setAttribute('aria-label', active ? 'Silenciar chuva e efeitos sonoros' : 'Ativar chuva e efeitos sonoros');
+    button.setAttribute('aria-label', active ? 'Silenciar chuva, trovões e efeitos sonoros' : 'Ativar chuva, trovões e efeitos sonoros');
     button.title = active ? 'Silenciar som' : 'Ativar som';
   }
 
@@ -155,11 +226,12 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
     filter.frequency.value = lowpassFrequency;
     filter.Q.value = .55;
     const gain = context.createGain();
-    gain.gain.value = gainValue;
+    gain.gain.value = 0;
     source.connect(filter).connect(gain).connect(destination);
     loops.push(source);
     nodes.push(source, filter, gain);
     source.start();
+    ramp(gain.gain, gainValue, context.currentTime, .25);
   }
 
   function initialize() {
@@ -178,15 +250,85 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
     nodes.push(compressor, master);
     windowPanner = createPanner(windowPoint, .32);
     lampPanner = createPanner(lampPoint, .4);
+    thunderFilter = context.createBiquadFilter();
+    thunderFilter.type = 'lowpass'; thunderFilter.frequency.value = 1900; thunderFilter.Q.value = .55;
+    thunderFilter.connect(windowPanner); nodes.push(thunderFilter);
     const pcm = generateRoomAudioPCM();
     buffers = {
       rain: makeBuffer(pcm.rain, pcm.sampleRate),
       glass: makeBuffer(pcm.glass, pcm.sampleRate),
-      flickers: pcm.flickers.map(samples => makeBuffer(samples, pcm.sampleRate))
+      flickers: pcm.flickers.map(samples => makeBuffer(samples, pcm.sampleRate)),
+      thunder: makeBuffer(pcm.thunder, pcm.sampleRate)
     };
-    startLoop(buffers.rain, 1.22, 1750, windowPanner);
-    startLoop(buffers.glass, .9, 3400, windowPanner);
     return true;
+  }
+
+  async function preparePlayback() {
+    await preload();
+    for (const kind of ['rain', 'thunder']) {
+      if (!encoded[kind] || disposed) continue;
+      try {
+        let buffer = await context.decodeAudioData(encoded[kind]);
+        if (disposed) return;
+        if (!Number.isFinite(buffer.duration) || buffer.duration < 1 || buffer.duration > 90 || buffer.numberOfChannels > 2) throw new Error('Invalid decoded audio');
+        if (kind === 'thunder') {
+          thunderAssetDuration = buffer.duration;
+          const channels = Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel));
+          const range = findThunderRange(channels, buffer.sampleRate);
+          thunderTrimStart = range.start / buffer.sampleRate;
+          thunderDetectedOnset = range.onset / buffer.sampleRate;
+          if ((range.end - range.start) / buffer.sampleRate < 1) throw new Error('Thunder recording has no usable tail');
+          const trimmed = context.createBuffer(buffer.numberOfChannels, range.end - range.start, buffer.sampleRate);
+          channels.forEach((signal, channel) => trimmed.copyToChannel(signal.subarray(range.start, range.end), channel));
+          buffer = trimmed;
+        }
+        // Normalize the recording conservatively while preserving its natural dynamics.
+        let squares = 0, peak = 0;
+        for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+          const signal = buffer.getChannelData(channel);
+          let sum = 0;
+          for (const value of signal) { if (!Number.isFinite(value)) throw new Error('Invalid audio sample'); sum += value; }
+          const mean = sum / signal.length;
+          for (let i = 0; i < signal.length; i++) {
+            signal[i] -= mean; squares += signal[i] ** 2; peak = Math.max(peak, Math.abs(signal[i]));
+          }
+        }
+        const rms = Math.sqrt(squares / (buffer.length * buffer.numberOfChannels));
+        if (rms < .00001) throw new Error('Silent audio asset');
+        const gain = Math.min((kind === 'rain' ? .075 : .12) / rms, .7 / Math.max(peak, .001), 4);
+        for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+          const signal = buffer.getChannelData(channel);
+          for (let i = 0; i < signal.length; i++) signal[i] *= gain;
+          if (kind === 'thunder') {
+            const attack = Math.round(buffer.sampleRate * .012), release = Math.round(buffer.sampleRate * .25);
+            for (let i = 0; i < attack; i++) signal[i] *= i / attack;
+            for (let i = 0; i < release; i++) signal[signal.length - 1 - i] *= i / release;
+          }
+        }
+        if (kind === 'rain') {
+          const channels = Array.from({ length: buffer.numberOfChannels }, (_, channel) => createSeamlessLoop(buffer.getChannelData(channel), buffer.sampleRate));
+          const loop = context.createBuffer(buffer.numberOfChannels, channels[0].length, buffer.sampleRate);
+          channels.forEach((signal, channel) => loop.copyToChannel(signal, channel));
+          buffer = loop;
+        }
+        buffers[kind] = buffer;
+        decodedBytes += buffer.length * buffer.numberOfChannels * 4;
+        assetSources[kind] = 'local-recording';
+      } catch (error) { assetErrors[kind] = error?.name || 'AudioDecodeError'; }
+      encoded[kind] = null;
+    }
+    if (disposed) return;
+    const thunder = buffers.thunder;
+    const count = Math.min(thunder.length, Math.round(thunder.sampleRate * .2));
+    let sum = 0, peak = 0;
+    for (let channel = 0; channel < thunder.numberOfChannels; channel++) {
+      const signal = thunder.getChannelData(channel);
+      for (let i = 0; i < count; i++) { sum += signal[i] ** 2; peak = Math.max(peak, Math.abs(signal[i])); }
+    }
+    thunderAttackRms = Math.sqrt(sum / (count * thunder.numberOfChannels));
+    thunderAttackPeak = peak;
+    startLoop(buffers.rain, 1.08, 2250, windowPanner);
+    startLoop(buffers.glass, .6, 3600, windowPanner);
   }
 
   async function synchronize() {
@@ -210,10 +352,31 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
         ramp(voice.gain.gain, 0, context.currentTime, .012);
         voice.source.stop(context.currentTime + .014);
       }
+      if (activeThunder && !activeThunder.stopping) {
+        activeThunder.stopping = true;
+        ramp(activeThunder.gain.gain, 0, context.currentTime, .022);
+        activeThunder.source.stop(context.currentTime + .024);
+      }
       ramp(master.gain, 0, context.currentTime, .035);
       suspendTimer = setTimeout(() => {
         suspendTimer = null;
-        if (!shouldPlay() && context?.state === 'running') context.suspend().catch(error => { lastError = error?.name || 'AudioSuspendError'; });
+        if (!shouldPlay() && context?.state === 'running') {
+          // A device can stall its audio clock during startup. Finalize the
+          // cancellation before suspend even when its scheduled stop has not run.
+          for (const voice of voices) {
+            voice.source.onended = null;
+            try { voice.source.stop(); } catch { /* Already ended. */ }
+            voice.source.disconnect(); voice.gain.disconnect();
+          }
+          voices.clear();
+          if (activeThunder) {
+            activeThunder.source.onended = null;
+            try { activeThunder.source.stop(); } catch { /* Already ended. */ }
+            activeThunder.source.disconnect(); activeThunder.gain.disconnect();
+            activeThunder = null;
+          }
+          context.suspend().catch(error => { lastError = error?.name || 'AudioSuspendError'; });
+        }
       }, 50);
     }
     return false;
@@ -228,6 +391,10 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
       if (!context && !initialize()) { updateButton(); return false; }
       unlocked = true;
       updateButton();
+      const resumed = synchronize();
+      if (!playbackPromise) playbackPromise = preparePlayback();
+      await resumed;
+      await playbackPromise;
       return await synchronize();
     } catch (error) {
       lastError = error?.name || 'AudioInitializationError';
@@ -267,6 +434,25 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
       gain.disconnect();
     };
     source.start(time);
+    return true;
+  }
+
+  function triggerThunder(strength = 1) {
+    if (!context || context.state !== 'running' || !shouldPlay() || !loops.length || activeThunder) return false;
+    const amount = Math.max(0, Math.min(1, Number(strength) || 0));
+    if (amount <= 0) return false;
+    const source = context.createBufferSource(), gain = context.createGain();
+    source.buffer = buffers.thunder;
+    gain.gain.setValueAtTime(.5 + amount * .6, context.currentTime);
+    source.connect(gain).connect(thunderFilter);
+    const voice = { source, gain };
+    activeThunder = voice;
+    source.onended = () => {
+      if (activeThunder === voice) activeThunder = null;
+      source.disconnect(); gain.disconnect();
+    };
+    source.start(context.currentTime);
+    thunderNumber++;
     return true;
   }
 
@@ -336,9 +522,15 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
       outputLatency: context?.outputLatency || 0,
       muted, paused, background: inBackground(), disposed,
       activeLoops: disposed ? 0 : loops.length, activeVoices: voices.size,
-      playingSources: context?.state === 'running' && shouldPlay() ? loops.length + voices.size : 0,
-      voiceLimit: ROOM_AUDIO_LIMITS.voices, bufferCount: buffers ? 5 : 0,
-      generatedBytes, flickerEventsPlayed: flickerNumber, masterGain: master?.gain.value || 0, lastError
+      activeThunder: activeThunder ? 1 : 0, thunderLimit: ROOM_AUDIO_LIMITS.thunder,
+      playingSources: context?.state === 'running' && shouldPlay() ? loops.length + voices.size + (activeThunder ? 1 : 0) : 0,
+      voiceLimit: ROOM_AUDIO_LIMITS.voices, bufferCount: buffers ? 6 : 0,
+      generatedBytes, decodedBytes, rainSource: assetSources.rain, thunderSource: assetSources.thunder, assetErrors: { ...assetErrors },
+      thunderEventsPlayed: thunderNumber, thunderDuration: buffers?.thunder.duration || 0,
+      thunderTrimStart, thunderDetectedOnset, thunderAssetDuration,
+      thunderAttackRms, thunderAttackPeak,
+      rainDuration: buffers?.rain.duration || 0,
+      flickerEventsPlayed: flickerNumber, masterGain: master?.gain.value || 0, lastError
     };
   }
 
@@ -358,8 +550,15 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
       voice.gain.disconnect();
     }
     voices.clear();
+    if (activeThunder) {
+      activeThunder.source.onended = null;
+      try { activeThunder.source.stop(); } catch { /* Already stopped. */ }
+      activeThunder.source.disconnect(); activeThunder.gain.disconnect();
+      activeThunder = null;
+    }
     for (const node of nodes) node.disconnect();
     buffers = null;
+    encoded.rain = encoded.thunder = null;
     if (context && context.state !== 'closed') await context.close();
     updateButton();
   }
@@ -378,5 +577,5 @@ export function createRoomAudio({ canvas, button, windowPosition, lampPosition }
   listen(host, 'blur', () => { focused = false; void synchronize(); });
   listen(host, 'focus', () => { focused = true; void synchronize(); });
   updateButton();
-  return { unlock, update, triggerFlicker, setMuted, setPaused, snapshot, sample, dispose };
+  return { preload, unlock, update, triggerFlicker, triggerThunder, setMuted, setPaused, snapshot, sample, dispose };
 }

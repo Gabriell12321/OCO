@@ -1,4 +1,93 @@
-# Validação da versão 0.8.0
+# Validação da versão 0.9.0
+
+Aplicativo Windows na Intel Iris Xe (D3D11/ANGLE), janela de 1900 × 977,
+perfil Desempenho com FXAA e resolução interna fixa de 1004 × 516.
+O teste de tempestade compara duas poses, cada uma com clarão desligado e
+no pico, por três segundos após aquecimento. A chuva permanece ligada;
+o áudio fica bloqueado nessa comparação para isolar o custo visual.
+
+| Vista | Clarão | FPS | Quadro p95 | GPU média | Draw calls |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Quarto | Desligado | 60,05 | 16,8 ms | 11,98 ms | 99 |
+| Quarto | Pico vermelho | 60,13 | 16,8 ms | 11,40 ms | 99 |
+| Janela | Desligado | 60,29 | 16,8 ms | 8,67 ms | 68 |
+| Janela | Pico vermelho | 60,04 | 16,8 ms | 8,65 ms | 68 |
+
+Todas as fases tiveram foco, cobertura temporal, câmera e resolução válidos,
+sem repetição. As pequenas diferenças estão dentro da variação de amostras
+curtas limitadas a 60 Hz; não demonstram ganho de GPU causado pelo clarão.
+Os pares mantêm exatamente a mesma contagem de triângulos e draw calls.
+A revisão do código confirmou que a mudança altera cores e intensidades,
+preservando os mapas de sombra. Nenhum emissor ou passe foi acrescentado.
+
+As capturas nativas foram inspecionadas: o vermelho atinge cortinas, cama,
+paredes e vidro a partir da janela, com sombras e textura preservadas.
+As regiões de análise identificaram 116.034 pixels com mudança vermelha na
+parede e 75.812 na cama; os estilos e elementos da interface permaneceram
+iguais. O efeito não usa uma camada de cor sobre a tela.
+
+## Áudio e sincronismo
+
+O aplicativo confirmou `local-recording` para chuva e trovão, sem erros de
+leitura ou decodificação. A chuva tem um ciclo efetivo de 22,402 s, com
+crossfade circular de 600 ms. O trovão remove 530 ms de início da gravação:
+o ataque detectado fica a 10 ms do novo início, e a duração final é de 7 s.
+
+O PCM dos primeiros 200 ms do trovão apresentou RMS 0,11268 e pico 0,47506.
+Na saída final, a chuva isolada teve RMS 0,00741/pico 0,02803; durante o
+ataque do trovão, RMS 0,11414/pico 0,34012. As amostras medidas não saturaram.
+O teste valida o sinal digital; não substitui uma avaliação auditiva com
+os alto-falantes ou fones do jogador.
+
+Na timeline real, um evento visual e um evento de áudio apareceram na mesma
+sondagem aos 10,0498 s. O ganho do clarão subiu e voltou a zero, compatível
+com seu envelope de 1,05 s. Isso verifica o acionamento compartilhado no
+aplicativo; a latência acústica física do dispositivo não foi medida.
+Não há atraso intencional entre luz e trovão.
+
+Mute e pausa produziram silêncio. Silenciar durante um evento não deixou
+trovão pendente para tocar depois; pausar durante o trovão encerrou a voz,
+congelou o relógio da cena e retomou a chuva sem repetir o trovão antigo.
+O limite de um trovão simultâneo foi respeitado. Relatório:
+`desktop/results/v0.9.0-storm-first/latest.json`, aprovado, sem erros ou avisos.
+
+## Percurso e regressões
+
+O percurso de 35,077 s teve chuva, piscadas, gravações de áudio e tempestade
+ativos. O teste exigiu e registrou um clarão e um trovão durante a medição,
+além de caminhada, corrida e movimento do mouse. A resolução ficou em
+1004 × 516, sem pausas, interrupções ou repetição de fases.
+
+| Medida | Percurso completo | Trechos em movimento |
+| --- | ---: | ---: |
+| FPS renderizados | 60,01 | 60,01 |
+| Quadro médio | 16,67 ms | 16,67 ms |
+| Quadro p95 | 16,8 ms | 16,8 ms |
+| Quadro p99 | 16,9 ms | 16,9 ms |
+| CPU média | 3,22 ms | 3,24 ms |
+| Quadros medidos | 2.105 | 1.503 |
+
+O aplicativo não registrou erros ou avisos. A regressão da sombra humana
+passou com a atmosfera congelada e atraso espacial máximo de 1,85 cm;
+nenhuma partícula interna foi renderizada. Relatório:
+`desktop/results/v0.9.0-movement-final/latest.json`.
+
+A troca Desempenho → Equilibrado → Qualidade → Desempenho passou, com
+resoluções de 1004 × 516, 1338 × 688 e 1582 × 812, sem erros ou avisos.
+A captura adicional do clarão em Qualidade foi revisada. Esse ciclo verifica
+funcionamento e aparência; não é um benchmark sustentado de FPS dos perfis
+mais pesados. Relatório: `desktop/results/v0.9.0-smoke-final/latest.json`.
+Os números de desempenho acima descrevem esta máquina e este percurso;
+não garantem o mesmo FPS em outros equipamentos ou perfis.
+
+As doze verificações locais passaram: arquivos/geometria, primeira pessoa,
+corpo humano, cabeça selada, projeção da sombra, cama, tecido, engine,
+filtro de sombras, iluminação, chuva e áudio. A revisão independente
+aprovou main, iluminação e áudio. Foram corrigidos na revisão a costura
+que podia introduzir um baque grave e os casos de cancelamento/recorte do
+trovão; os testes cobrem esses comportamentos.
+
+## Referência da versão 0.8.0
 
 Aplicativo Windows na Intel Iris Xe (D3D11/ANGLE), janela de 1900 × 977,
 perfil Desempenho com FXAA e resolução interna fixa de 1004 × 516.

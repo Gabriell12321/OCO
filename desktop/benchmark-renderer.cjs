@@ -40,6 +40,7 @@ async function runRendererBenchmark(requestedQuality) {
   }
   if (requestedQuality) room.setQuality(requestedQuality);
   await delay(5200);
+  room.setDiagnosticAtmosphere?.({ time: 0, frozen: false, rain: true, lamp: null, thunder: null });
 
   const key = (type, code, keyName) => document.dispatchEvent(new KeyboardEvent(type, { code, key: keyName, bubbles: true }));
   const pressed = new Set();
@@ -343,6 +344,94 @@ async function runWeatherAudioCheck() {
       after: afterFlicker.atmosphere, audio: afterFlicker.audio } };
 }
 
+async function runStormAudioCheck() {
+  const room = window.Quarto01, delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const snapshot = () => room.getPerformanceSnapshot();
+  const sampleState = async () => ({ sample: await room.diagnosticAudio('sample'), snapshot: snapshot().audio });
+  const startup = await waitForAudioClock(), rain = await sampleState();
+  room.setDiagnosticAtmosphere({ time: 0, frozen: false, rain: true, lamp: null, thunder: null });
+  const before = snapshot(), timeline = [], soundSamples = [], pendingSamples = [];
+  const started = performance.now();
+  let sampledAttack = false, sampledTail = false;
+  while (performance.now() - started < 11600) {
+    const s = snapshot(), light = s.atmosphere.light;
+    timeline.push({ wallMs: performance.now() - started, time: s.atmosphere.time,
+      gain: light.thunderGain, event: light.thunderEvent, lightEvents: light.thunderEvents,
+      soundEvents: s.audio.thunderEventsPlayed, activeThunder: s.audio.activeThunder,
+      paused: s.paused, focused: document.hasFocus(), hidden: document.hidden });
+    const attack = !sampledAttack && light.thunderGain > .3;
+    const tail = sampledAttack && !sampledTail && s.atmosphere.time > 10.65;
+    if (attack || tail) {
+      if (attack) sampledAttack = true; else sampledTail = true;
+      const time = s.atmosphere.time;
+      pendingSamples.push(sampleState().then(state => soundSamples.push({ time, ...state })));
+    }
+    await delay(40);
+  }
+  await Promise.all(pendingSamples);
+  const after = snapshot();
+
+  // A muted event must be consumed by the shared timeline without being queued
+  // for later playback. The real renderer keeps advancing during this check.
+  room.diagnosticAudio('mute', true); await delay(180);
+  const muted = await sampleState(), beforeMuted = snapshot();
+  room.setDiagnosticAtmosphere({ time: 9.7, frozen: false, lamp: 1, thunder: null });
+  await delay(1650);
+  const afterMuted = snapshot();
+  room.diagnosticAudio('mute', false);
+  const unmuteStartup = await waitForAudioClock(); await delay(200);
+  const afterUnmute = await sampleState();
+  const noDelayedAfterMute = afterMuted.atmosphere.light.thunderEvents === beforeMuted.atmosphere.light.thunderEvents + 1 &&
+    afterMuted.audio.thunderEventsPlayed === beforeMuted.audio.thunderEventsPlayed &&
+    afterUnmute.snapshot.thunderEventsPlayed === afterMuted.audio.thunderEventsPlayed && afterUnmute.snapshot.activeThunder === 0;
+
+  // Pause while a real thunder voice is active, then resume inside the same
+  // flash. Old audio must not restart or appear as a newly triggered event.
+  room.setDiagnosticAtmosphere({ time: 9.7, frozen: false, lamp: 1, thunder: null });
+  const eventDeadline = performance.now() + 2500;
+  while (!snapshot().audio.activeThunder && performance.now() < eventDeadline) await delay(20);
+  const beforePause = snapshot();
+  room.pause(); await delay(1300);
+  const paused = { ...await sampleState(), render: snapshot() };
+  room.resume();
+  const resumeStartup = await waitForAudioClock(); await delay(200);
+  const resumed = { ...await sampleState(), render: snapshot() };
+  const noDelayedAfterPause = beforePause.audio.activeThunder === 1 && paused.render.paused &&
+    Math.abs(paused.render.atmosphere.time - beforePause.atmosphere.time) < .03 &&
+    paused.snapshot.activeThunder === 0 && resumed.snapshot.activeThunder === 0 &&
+    resumed.snapshot.thunderEventsPlayed === beforePause.audio.thunderEventsPlayed;
+  const lightEvents = after.atmosphere.light.thunderEvents - before.atmosphere.light.thunderEvents;
+  const soundEvents = after.audio.thunderEventsPlayed - before.audio.thunderEventsPlayed;
+  const firstLight = timeline.find(s => s.lightEvents > before.atmosphere.light.thunderEvents);
+  const firstSound = timeline.find(s => s.soundEvents > before.audio.thunderEventsPlayed);
+  const synchronized = Boolean(firstLight && firstSound && Math.abs(firstLight.time - firstSound.time) < .08);
+  const attackMix = soundSamples[0]?.sample;
+  const mixComparison = { rainRms: rain.sample.rms, attackRms: attackMix?.rms ?? 0,
+    rmsRatio: (attackMix?.rms ?? 0) / Math.max(.000001, rain.sample.rms),
+    rainPeak: rain.sample.peak, attackPeak: attackMix?.peak ?? 0 };
+  const decodedThunder = { source: after.audio.thunderSource, trimStart: after.audio.thunderTrimStart,
+    detectedOnset: after.audio.thunderDetectedOnset, assetDuration: after.audio.thunderAssetDuration,
+    duration: after.audio.thunderDuration, attackRms: after.audio.thunderAttackRms,
+    attackPeak: after.audio.thunderAttackPeak, attackDurationMs: 200 };
+  const silence = state => state.sample.rms < .000001 && state.sample.peak < .000001 && state.snapshot.playingSources === 0;
+  const audible = state => state.sample.rms > .000001 && state.sample.peak > .000001 && state.sample.peak <= 1;
+  const timelineUninterrupted = timeline.every(s => !s.paused && !s.hidden && s.focused) && after.atmosphere.time >= 11.5;
+  const passed = startup.ready && unmuteStartup.ready && resumeStartup.ready && audible(rain) &&
+    timelineUninterrupted && synchronized && lightEvents === 1 && soundEvents === 1 &&
+    timeline.filter(s => s.time < 10).every(s => s.gain === 0 && s.soundEvents === before.audio.thunderEventsPlayed) &&
+    Math.max(...timeline.map(s => s.gain)) > .8 && after.atmosphere.light.thunderGain === 0 &&
+    soundSamples.length === 2 && soundSamples.every(audible) && silence(muted) && silence(paused) &&
+    noDelayedAfterMute && noDelayedAfterPause && audible(resumed) && !resumed.render.paused &&
+    timeline.every(s => s.activeThunder <= 1) && after.atmosphere.light.staticShadowPassesPerThunder === 0 &&
+    decodedThunder.attackRms > .0001 && decodedThunder.attackPeak > .001 &&
+    Math.max(0, decodedThunder.detectedOnset - decodedThunder.trimStart) < .1 &&
+    !after.audio.lastError && Object.keys(after.audio.assetErrors || {}).length === 0 &&
+    after.audio.rainSource === 'local-recording' && after.audio.thunderSource === 'local-recording';
+  return { passed, startup, rain, timelineUninterrupted, synchronized, lightEvents, soundEvents,
+    firstLight, firstSound, mixComparison, decodedThunder, before, after, timeline, soundSamples, muted, beforeMuted, afterMuted,
+    unmuteStartup, afterUnmute, noDelayedAfterMute, beforePause, paused, resumed, resumeStartup, noDelayedAfterPause };
+}
+
 module.exports = {
   buildBenchmarkScript(quality) {
     return '(() => { const createTimingGuard = ' + createTimingGuard.toString() + '; return (' + runRendererBenchmark.toString() + ')(' + JSON.stringify(quality) + '); })()';
@@ -355,4 +444,5 @@ module.exports = {
   },
   buildAudioReadyScript() { return '(' + waitForAudioClock.toString() + ')()'; },
   buildWeatherAudioScript() { return '(() => { const waitForAudioClock = ' + waitForAudioClock.toString() + '; return (' + runWeatherAudioCheck.toString() + ')(); })()'; },
+  buildStormAudioScript() { return '(() => { const waitForAudioClock = ' + waitForAudioClock.toString() + '; return (' + runStormAudioCheck.toString() + ')(); })()'; },
 };

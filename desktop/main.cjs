@@ -4,7 +4,7 @@ const { app, BrowserWindow, Menu, protocol, session, ipcMain, dialog } = require
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { buildBenchmarkScript, buildBedPrepareScript, buildBedPhaseScript, buildWeatherAudioScript, buildAudioReadyScript } = require('./benchmark-renderer.cjs');
+const { buildBenchmarkScript, buildBedPrepareScript, buildBedPhaseScript, buildWeatherAudioScript, buildAudioReadyScript, buildStormAudioScript } = require('./benchmark-renderer.cjs');
 
 const NO_MSAA_BENCHMARK = process.argv.includes('--benchmark-no-msaa');
 const FORCE_MSAA4_BENCHMARK = process.argv.includes('--benchmark-msaa4');
@@ -22,7 +22,8 @@ const BED_SURFACE_BASE_ONLY = process.argv.includes('--capture-bed-base');
 const BED_SURFACES = process.argv.includes('--capture-bed-surfaces') || BED_SURFACE_BASE_ONLY;
 const WEATHER_BENCHMARK = process.argv.includes('--benchmark-weather');
 const AUDIO_PROBE = process.argv.includes('--probe-audio');
-const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY || BED_BENCHMARK || BED_SURFACES || WEATHER_BENCHMARK || AUDIO_PROBE;
+const STORM_BENCHMARK = process.argv.includes('--benchmark-storm') || process.argv.includes('--probe-storm');
+const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY || BED_BENCHMARK || BED_SURFACES || WEATHER_BENCHMARK || AUDIO_PROBE || STORM_BENCHMARK;
 const requestedQualityArgument = process.argv.find(arg => arg.startsWith('--benchmark-quality='));
 const requestedQuality = requestedQualityArgument?.slice('--benchmark-quality='.length);
 const BENCHMARK_QUALITY = ['performance', 'balanced', 'quality'].includes(requestedQuality) ? requestedQuality : null;
@@ -174,7 +175,7 @@ async function captureDiagnosticView(win, view) {
 async function captureShadowRegression(win) {
   const hasAtmosphere = await win.webContents.executeJavaScript(`(() => {
     if (typeof window.Quarto01.setDiagnosticAtmosphere !== 'function') return false;
-    window.Quarto01.setDiagnosticAtmosphere({ time: 0, frozen: true, rain: false, lamp: 1 });
+    window.Quarto01.setDiagnosticAtmosphere({ time: 0, frozen: true, rain: false, lamp: 1, thunder: 0 });
     return true;
   })()`);
   try {
@@ -267,7 +268,7 @@ async function captureShadowRegression(win) {
     comparisons, movement: { passed: movementPassed, movedDistance, maximumShadowLag,
       samples: movement, start: movementStart, endFilename: movementEndFile, returnedWall } };
   } finally {
-    if (hasAtmosphere) await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere({ frozen: false, rain: true, lamp: null })');
+    if (hasAtmosphere) await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere({ frozen: false, rain: true, lamp: null, thunder: null })');
   }
 }
 
@@ -304,6 +305,7 @@ async function runBenchmark(win) {
       }
     })()`);
     await focusDiagnosticWindow(win);
+    await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere?.({ time: 0, frozen: true, rain: true, lamp: 1, thunder: 0 })');
     const audioUnlocked = await win.webContents.executeJavaScript("window.Quarto01.diagnosticAudio?.('unlock') ?? null", true);
     const audioStartup = audioUnlocked === null ? null : await win.webContents.executeJavaScript(buildAudioReadyScript());
     const audioSample = audioUnlocked === null ? null : await win.webContents.executeJavaScript("window.Quarto01.diagnosticAudio('sample')");
@@ -319,7 +321,11 @@ async function runBenchmark(win) {
     const shadowRegression = await captureShadowRegression(win);
     const realAudioWorkload = audioUnlocked === null || (audioUnlocked === true && audioStartup.ready && audioSample.rms > .000001 &&
       metrics.startSnapshot.audio?.playingSources >= 2 && metrics.renderer.audio?.playingSources >= 2);
-    const passed = firstPersonInspection.passed && metrics.timingVerified && realAudioWorkload && metrics.movementVerified && metrics.turningVerified &&
+    const realStormWorkload = metrics.renderer.atmosphere?.light.thunderEvents === undefined ||
+      (metrics.renderer.atmosphere.light.thunderEvents > metrics.startSnapshot.atmosphere.light.thunderEvents &&
+        metrics.renderer.audio.thunderEventsPlayed - metrics.startSnapshot.audio.thunderEventsPlayed ===
+        metrics.renderer.atmosphere.light.thunderEvents - metrics.startSnapshot.atmosphere.light.thunderEvents);
+    const passed = firstPersonInspection.passed && metrics.timingVerified && realAudioWorkload && realStormWorkload && metrics.movementVerified && metrics.turningVerified &&
       metrics.runningVerified && metrics.gaitVerified && metrics.shadowMovementVerified && shadowRegression.success &&
       metrics.renderer.version === app.getVersion() &&
       metrics.startSnapshot.view === 'first-person' && metrics.renderer.view === 'first-person' &&
@@ -328,7 +334,7 @@ async function runBenchmark(win) {
       !ERRORS.some(error => error.kind !== 'console-warning');
     writeResult({ success: passed, date: new Date().toISOString(), electron: process.versions.electron,
       chromium: process.versions.chrome, gpuFeatureStatus: app.getGPUFeatureStatus(), gpu,
-      metrics, audioUnlocked, audioStartup, audioSample, realAudioWorkload, firstPersonInspection, screenshotPath, captures, shadowRegression, rendererReport: latestRendererReport, errors: ERRORS });
+      metrics, audioUnlocked, audioStartup, audioSample, realAudioWorkload, realStormWorkload, firstPersonInspection, screenshotPath, captures, shadowRegression, rendererReport: latestRendererReport, errors: ERRORS });
     app.exit(passed ? 0 : 1);
   } catch (error) {
     writeResult({ success: false, date: new Date().toISOString(), message: String(error), errors: ERRORS });
@@ -471,6 +477,90 @@ function compareDiagnosticImages(first, second) {
   return { changedPixels, secondDarkerPixels, meanAbsoluteChannelDelta: delta / Math.max(1, count * 3) };
 }
 
+function compareStormImages(offImage, onImage, view) {
+  const size = offImage.getSize(1), off = offImage.toBitmap({ scaleFactor: 1 }), on = onImage.toBitmap({ scaleFactor: 1 });
+  if (off.length !== on.length) throw new Error('As capturas da tempestade têm tamanhos diferentes.');
+  const regions = view === 'initial'
+    ? { wall: [.22, .23, .44, .52], bed: [.36, .59, .62, .79], window: [.64, .2, .8, .48] }
+    : { window: [.38, .16, .82, .72], room: [.06, .2, .32, .79] };
+  const results = {};
+  for (const [name, [left, top, right, bottom]] of Object.entries(regions)) {
+    let pixels = 0, redPixels = 0, red = 0, green = 0, blue = 0;
+    for (let y = Math.floor(top * size.height); y < bottom * size.height; y++) {
+      for (let x = Math.floor(left * size.width); x < right * size.width; x++) {
+        const i = (y * size.width + x) * 4;
+        // NativeImage bitmaps use BGRA on the packaged Windows target.
+        const dr = on[i + 2] - off[i + 2], dg = on[i + 1] - off[i + 1], db = on[i] - off[i];
+        pixels++; red += dr; green += dg; blue += db;
+        if (dr > 8 && dr - dg > 4 && dr - db > 4) redPixels++;
+      }
+    }
+    results[name] = { pixels, redPixels, meanRedDelta: red / pixels, meanGreenDelta: green / pixels,
+      meanBlueDelta: blue / pixels, bounds: { left, top, right, bottom } };
+  }
+  return results;
+}
+
+async function inspectStormUI(win) {
+  return win.webContents.executeJavaScript(`(() => {
+    const selectors = ['.environment-label', '.controls-hint', '.view-actions', '.lens-vignette', '#crosshair'];
+    return { elements: [...document.querySelectorAll('body *')].map(element => [element.tagName, element.id, element.className?.baseVal ?? element.className]),
+      styles: selectors.map(selector => {
+        const style = getComputedStyle(document.querySelector(selector));
+        return { selector, color: style.color, background: style.background, opacity: style.opacity,
+          filter: style.filter, mixBlendMode: style.mixBlendMode };
+      }) };
+  })()`);
+}
+
+async function runStormBenchmark(win) {
+  try {
+    const initial = await win.webContents.executeJavaScript(buildBedPrepareScript(BENCHMARK_QUALITY || 'performance'));
+    const sourceOff = !initial.snapshot.audio.initialized && !initial.snapshot.audio.unlocked;
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    const captures = [], phases = [], comparisons = [];
+    for (const view of ['initial', 'window']) {
+      const images = [], ui = [];
+      for (const thunder of [0, 1]) {
+        const label = view + (thunder ? '-thunder-on' : '-thunder-off');
+        const atmosphere = { time: 0, frozen: true, rain: true, lamp: 1, thunder };
+        await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere(' + JSON.stringify(atmosphere) + ')');
+        const phase = await measureDiagnosticView(win, { id: label, view, duration: 3000, turn: false });
+        phases.push({ ...phase, thunder });
+        const capture = await captureAtmosphereView(win, view, label, atmosphere);
+        ui.push(await inspectStormUI(win)); images.push(capture.image);
+        const { image: _image, ...record } = capture; captures.push(record);
+      }
+      const pair = captures.slice(-2);
+      const cameraUnchanged = JSON.stringify([pair[0].snapshot.cameraPosition, pair[0].snapshot.cameraQuaternion]) ===
+        JSON.stringify([pair[1].snapshot.cameraPosition, pair[1].snapshot.cameraQuaternion]);
+      comparisons.push({ view, cameraUnchanged, uiUnchanged: JSON.stringify(ui[0]) === JSON.stringify(ui[1]),
+        regions: compareStormImages(images[0], images[1], view), ui });
+    }
+    await focusDiagnosticWindow(win);
+    await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere({ time: 0, frozen: true, rain: true, lamp: 1, thunder: 0 })');
+    const unlocked = await win.webContents.executeJavaScript("window.Quarto01.diagnosticAudio('unlock')", true);
+    const audio = await win.webContents.executeJavaScript(buildStormAudioScript());
+    await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere({ frozen: false, rain: true, lamp: null, thunder: null })');
+    const fixedResolution = phases.every(phase => phase.fixedResolution &&
+      phase.before.drawingBufferWidth === initial.snapshot.drawingBufferWidth && phase.before.drawingBufferHeight === initial.snapshot.drawingBufferHeight);
+    const visualPassed = comparisons.every(pair => pair.cameraUnchanged && pair.uiUnchanged) &&
+      comparisons[0].regions.wall.redPixels > 100 && comparisons[0].regions.bed.redPixels > 100 && comparisons[1].regions.window.redPixels > 100;
+    const recordedAudio = audio.after.audio.rainSource === 'local-recording' && audio.after.audio.thunderSource === 'local-recording';
+    const passed = sourceOff && unlocked === true && audio.passed && recordedAudio && fixedResolution && visualPassed &&
+      phases.every(phase => phase.timingIntegrity.valid && phase.poseVerified && phase.after.renderStats.points === 0 &&
+        phase.frames > 30 && (!phase.gpu.available || phase.gpu.samples > 4) &&
+        phase.after.atmosphere.light.thunderGain === phase.thunder && phase.after.atmosphere.light.staticShadowPassesPerThunder === 0) &&
+      !ERRORS.some(error => error.kind !== 'console-warning');
+    writeResult({ success: passed, test: 'red-storm-room-window-and-synchronized-thunder', initial, sourceOff, unlocked,
+      fixedResolution, visualPassed, recordedAudio, phases, comparisons, captures, audio, errors: ERRORS });
+    app.exit(passed ? 0 : 1);
+  } catch (error) {
+    writeResult({ success: false, test: 'red-storm-room-window-and-synchronized-thunder', message: String(error), errors: ERRORS });
+    app.exit(1);
+  }
+}
+
 async function runWeatherBenchmark(win) {
   try {
     const initial = await win.webContents.executeJavaScript(buildBedPrepareScript(BENCHMARK_QUALITY || 'performance'));
@@ -560,7 +650,7 @@ async function runQualitySmoke(win) {
       await new Promise(resolve => setTimeout(resolve, 2500));
     })()`);
     fs.mkdirSync(RESULTS_DIR, { recursive: true });
-    const snapshots = [];
+    const snapshots = [], stormCaptures = [];
     const firstPersonInspections = [];
     const qualityOrder = QUALITY_STEADY_PROBE ? ['quality', 'performance'] : ['performance', 'balanced', 'quality', 'performance'];
     for (const quality of qualityOrder) {
@@ -599,6 +689,12 @@ async function runQualitySmoke(win) {
       snapshots.push(snapshot);
       firstPersonInspections.push(await win.webContents.executeJavaScript(INSPECT_FIRST_PERSON));
       fs.writeFileSync(path.join(RESULTS_DIR, quality + '.png'), (await win.webContents.capturePage()).toPNG());
+      if (quality === 'quality' && snapshot.atmosphere?.light.thunderGain !== undefined) {
+        const capture = await captureAtmosphereView(win, 'initial', 'quality-thunder',
+          { time: 10.15, frozen: true, rain: true, lamp: 1, thunder: 1 });
+        const { image: _image, ...record } = capture; stormCaptures.push(record);
+        await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere({ time: 0, frozen: false, rain: true, lamp: null, thunder: null })');
+      }
     }
     const passed = snapshots.every((snapshot, index) => snapshot.quality === qualityOrder[index]) &&
       snapshots.every(snapshot => snapshot.ready && !snapshot.paused && !snapshot.loadingVisible && !snapshot.errorVisible) &&
@@ -610,7 +706,7 @@ async function runQualitySmoke(win) {
       (!QUALITY_STEADY_PROBE || snapshots.every(snapshot => snapshot.steadyProbe?.frames > 10)) &&
       firstPersonInspections.every(inspection => inspection.passed) &&
       !ERRORS.some(error => error.kind !== 'console-warning');
-    writeResult({ success: passed, test: QUALITY_STEADY_PROBE ? 'quality-steady-three-second-probe' : 'three-quality-profiles-and-return-smoke', snapshots, firstPersonInspections, errors: ERRORS });
+    writeResult({ success: passed, test: QUALITY_STEADY_PROBE ? 'quality-steady-three-second-probe' : 'three-quality-profiles-and-return-smoke', snapshots, stormCaptures, firstPersonInspections, errors: ERRORS });
     app.exit(passed ? 0 : 1);
   } catch (error) {
     writeResult({ success: false, test: QUALITY_STEADY_PROBE ? 'quality-steady-three-second-probe' : 'three-quality-profiles-and-return-smoke', message: String(error), errors: ERRORS });
@@ -668,7 +764,8 @@ function createWindow() {
       await win.webContents.executeJavaScript(INSTALL_DIAGNOSTIC_INPUT_GUARD);
       win.setTitle('Quarto 01 — Teste automático');
     }
-    if (AUDIO_PROBE) runAudioProbe(win);
+    if (STORM_BENCHMARK) runStormBenchmark(win);
+    else if (AUDIO_PROBE) runAudioProbe(win);
     else if (WEATHER_BENCHMARK) runWeatherBenchmark(win);
     else if (BED_SURFACES) runBedSurfaceCapture(win);
     else if (BED_BENCHMARK) runBedBenchmark(win);

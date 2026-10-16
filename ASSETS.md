@@ -26,3 +26,27 @@ sprites externos. Os sons de chuva, pingos e falhas elétricas são sintetizados
 localmente por `dist/audio/room-audio.js`, com ruído determinístico, osciladores
 e envelopes. Não há gravações de terceiros, downloads de áudio ou requisições
 de rede durante a reprodução.
+
+## Gravações de chuva e trovão da versão 0.9.0
+
+Gravações naturais substituem a camada principal de chuva sintetizada e
+fornecem o trovão. Ambas são distribuídas pelos autores sob
+[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). As páginas e
+licenças foram conferidas em 16 de outubro de 2026. Os MP3 de prévia em alta
+qualidade disponibilizados publicamente pelo Freesound são incluídos localmente,
+sem alterações no arquivo. A reprodução não depende de internet ou de conta.
+
+| Arquivo local | Gravação e autor | Fonte do arquivo | Bytes |
+| --- | --- | --- | ---: |
+| `dist/assets/audio/rain-window.mp3` | [rain - outside window.wav — Anthousai](https://freesound.org/people/Anthousai/sounds/398741/) | [MP3 HQ](https://cdn.freesound.org/previews/398/398741_5923045-hq.mp3) | 558000 |
+| `dist/assets/audio/distant-thunder.mp3` | [Distant Thunder 3 — Fission9](https://freesound.org/people/Fission9/sounds/581124/) | [MP3 HQ](https://cdn.freesound.org/previews/581/581124_9395330-hq.mp3) | 193200 |
+
+SHA-256 dos arquivos distribuídos:
+
+- Chuva: `7345cb8a095163b7188e074160fac0c7b9ca72a534025a97bdb589a6b9ff943d`.
+- Trovão: `8036733e48a347e0a36d249f4b783dafaf09d7a69ab3962f43e51ac8c0af796c`.
+
+O módulo de áudio prepara a transição do loop, níveis e filtros em memória.
+Pingos suplementares e estalos elétricos continuam sendo efeitos próprios.
+Se uma gravação não puder ser lida ou decodificada, existe uma alternativa
+procedural local; o diagnóstico informa qual fonte foi efetivamente utilizada.

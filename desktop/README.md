@@ -1,6 +1,6 @@
 # Quarto 01 para Windows
 
-Versão 0.8.0, exclusivamente em primeira pessoa. Empacotamento portátil com
+Versão 0.9.0, exclusivamente em primeira pessoa. Empacotamento portátil com
 Electron oficial 44.7.2 para Windows x64. O usuário
 abre `Quarto 01.exe`; Node, navegador, instalação e internet não são necessários.
 
@@ -92,6 +92,15 @@ e desligam a chuva para preservar pares de imagens idênticos.
 `--probe-audio` executa apenas a verificação de áudio, incluindo a partida do
 dispositivo: aguarda avanço de pelo menos 80 ms no relógio do AudioContext e
 ganho estabilizado, por no máximo 3 segundos, antes de exigir RMS não nulo.
+
+`--benchmark-storm` (ou `--probe-storm`) compara o quarto e a janela com o
+clarão vermelho desligado e no pico, em resolução fixa. Mede quatro fases de
+3 segundos, verifica mudança vermelha na parede/cama/janela e preservação
+da interface. A timeline avança do zero até o primeiro trovão; o teste mede
+o sinal sonoro durante o ataque, confere o evento compartilhado e exige
+gravações locais decodificadas. Silenciar e pausar durante eventos não pode
+deixar trovões antigos para tocar depois. O percurso de 35 segundos também
+exige pelo menos um trovão acompanhado pelo clarão durante a medição.
 
 Se o shell de desenvolvimento herdou `ELECTRON_RUN_AS_NODE=1`, remova essa
 variável apenas do processo que iniciará o teste. O atalho `ABRIR QUARTO.cmd`
