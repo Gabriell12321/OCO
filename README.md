@@ -4,9 +4,16 @@ Um único quarto 3D de terror psicológico, explorado exclusivamente em primeira
 
 [Baixar a versão Windows](https://github.com/Gabriell12321/OCO/releases/latest). Extraia o ZIP completo e abra `Quarto 01.exe`.
 
-A versão 0.6.1 fecha as aberturas da cabeça na sombra, corrige as projeções
-indevidas sobre a cama e remove a poeira flutuante. A sombra respeita a distância
-entre a lâmpada, o jogador e cada superfície, e acompanha o deslocamento pelo quarto.
+A versão 0.7.0 refaz os tecidos da cama: travesseiros com painéis e abas
+costuradas, dobras de tensão no edredom, borda retornada com espessura e manta
+apoiada sobre o caimento. A geometria dos tecidos passa de 90.000 para 34.934
+triângulos. O algodão usa mapas filtrados, escala real e rugosidade compartilhada
+com a normal, reduzindo as leituras de textura. As correções da cabeça, da
+projeção da sombra e a remoção das partículas continuam presentes.
+
+A primeira base da **OCO Engine** separa o pipeline de imagem, os lotes de
+geometria estática e o controle de resolução. O backend é Three.js/WebGL2;
+os módulos próprios estão documentados em [ENGINE.md](ENGINE.md).
 
 Versão Windows portátil: abra `Windows/Quarto 01/Quarto 01.exe`, na pasta acima deste projeto. Extraia o ZIP inteiro antes de abrir e mantenha o executável junto das demais pastas e arquivos. Node, navegador e conexão à internet não são necessários para usar o programa.
 

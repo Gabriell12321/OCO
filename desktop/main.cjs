@@ -4,7 +4,7 @@ const { app, BrowserWindow, Menu, protocol, session, ipcMain, dialog } = require
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { buildBenchmarkScript } = require('./benchmark-renderer.cjs');
+const { buildBenchmarkScript, buildBedPrepareScript, buildBedPhaseScript } = require('./benchmark-renderer.cjs');
 
 const NO_MSAA_BENCHMARK = process.argv.includes('--benchmark-no-msaa');
 const FORCE_MSAA4_BENCHMARK = process.argv.includes('--benchmark-msaa4');
@@ -17,7 +17,10 @@ const CONTENT_ROOT = path.resolve(__dirname, 'dist');
 const QUALITY_STEADY_PROBE = process.argv.includes('--quality-steady-probe');
 const SMOKE_PROFILE_CYCLE = process.argv.includes('--smoke-profile-cycle') || QUALITY_STEADY_PROBE;
 const CAPTURE_VIEWS_ONLY = process.argv.includes('--capture-views-only');
-const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY;
+const BED_BENCHMARK = process.argv.includes('--benchmark-bed');
+const BED_SURFACE_BASE_ONLY = process.argv.includes('--capture-bed-base');
+const BED_SURFACES = process.argv.includes('--capture-bed-surfaces') || BED_SURFACE_BASE_ONLY;
+const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY || BED_BENCHMARK || BED_SURFACES;
 const requestedQualityArgument = process.argv.find(arg => arg.startsWith('--benchmark-quality='));
 const requestedQuality = requestedQualityArgument?.slice('--benchmark-quality='.length);
 const BENCHMARK_QUALITY = ['performance', 'balanced', 'quality'].includes(requestedQuality) ? requestedQuality : null;
@@ -128,6 +131,22 @@ const INSPECT_FIRST_PERSON = `(async () => {
     beforeView: before.view, afterView: after.view, hasViewButton,
     characterAbsent, firstPersonOnly, characterResources,
   };
+})()`;
+
+// Native diagnostics own their temporary test window. Ignore physical room
+// controls while measuring, but preserve the synthetic inputs under test and
+// the operating-system window controls (the user can still close the window).
+const INSTALL_DIAGNOSTIC_INPUT_GUARD = `(() => {
+  const ignorePhysicalInput = event => {
+    if (!event.isTrusted) return;
+    if (event.cancelable) event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  for (const name of ['keydown', 'keyup', 'mousedown', 'mouseup', 'mousemove',
+    'pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'touchend',
+    'click', 'dblclick', 'wheel']) {
+    window.addEventListener(name, ignorePhysicalInput, { capture: true, passive: false });
+  }
 })()`;
 
 async function captureDiagnosticView(win, view) {
@@ -292,6 +311,83 @@ async function runBenchmark(win) {
   }
 }
 
+async function runBedBenchmark(win) {
+  try {
+    const initial = await win.webContents.executeJavaScript(buildBedPrepareScript(BENCHMARK_QUALITY || 'performance'));
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    const plans = [
+      { id: 'initial-control', view: 'initial', duration: 3000, turn: false },
+      { id: 'bed-right', view: 'bed-right', duration: 5000, turn: false },
+      { id: 'bed-foot', view: 'bed-foot', duration: 5000, turn: true },
+      { id: 'bed-left', view: 'bed-left', duration: 5000, turn: true },
+      { id: 'blanket-close', view: 'blanket', pitchInput: 100, duration: 5000, turn: true },
+    ];
+    const views = [];
+    for (const plan of plans) {
+      const measured = await win.webContents.executeJavaScript(buildBedPhaseScript(plan));
+      const filename = path.join(RESULTS_DIR, plan.id + '.png');
+      fs.writeFileSync(filename, (await win.webContents.capturePage()).toPNG());
+      views.push({ ...measured, filename });
+    }
+    const firstPersonInspection = await win.webContents.executeJavaScript(INSPECT_FIRST_PERSON);
+    const fixedResolution = views.every(view => view.fixedResolution &&
+      view.before.drawingBufferWidth === initial.snapshot.drawingBufferWidth &&
+      view.before.drawingBufferHeight === initial.snapshot.drawingBufferHeight);
+    const passed = firstPersonInspection.passed && fixedResolution &&
+      views.every(view => view.frames > 30 && view.turningVerified && view.poseVerified && !view.after.paused &&
+        (!view.gpu.available || view.gpu.samples > 4)) &&
+      !ERRORS.some(error => error.kind !== 'console-warning');
+    writeResult({ success: passed, test: 'bed-fixed-resolution-five-views', date: new Date().toISOString(),
+      initial, fixedResolution, views, firstPersonInspection, errors: ERRORS });
+    app.exit(passed ? 0 : 1);
+  } catch (error) {
+    writeResult({ success: false, test: 'bed-fixed-resolution-five-views', message: String(error), errors: ERRORS });
+    app.exit(1);
+  }
+}
+
+async function runBedSurfaceCapture(win) {
+  try {
+    const initial = await win.webContents.executeJavaScript(buildBedPrepareScript(BENCHMARK_QUALITY || 'performance'));
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    const captures = [];
+    const views = BED_SURFACE_BASE_ONLY ? ['bed-left', 'bed-foot', 'bed-right', 'shadow'] : ['bed-left', 'bed-foot'];
+    const modes = BED_SURFACE_BASE_ONLY ? ['base'] : ['base', 'normal-off', 'receive-shadow-off', 'shadow-bias', 'shadow-filter'];
+    for (const view of views) {
+      await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticView(' + JSON.stringify(view) + ')');
+      for (const mode of modes) {
+        const snapshot = await win.webContents.executeJavaScript(`(async () => {
+          const room = window.Quarto01, firstFrame = room.getPerformanceSnapshot().totalFrames;
+          if (room.setDiagnosticFabricMode(${JSON.stringify(mode)}) !== true) throw new Error('Modo de tecido indisponível.');
+          const deadline = performance.now() + 20000;
+          while (room.getPerformanceSnapshot().totalFrames < firstFrame + 12) {
+            if (performance.now() > deadline) throw new Error('O tecido não terminou de renderizar.');
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          await new Promise(resolve => setTimeout(resolve, 300));
+          return room.getPerformanceSnapshot();
+        })()`);
+        const filename = path.join(RESULTS_DIR, view + '-' + mode + '.png');
+        fs.writeFileSync(filename, (await win.webContents.capturePage()).toPNG());
+        captures.push({ view, mode, filename, snapshot });
+      }
+    }
+    await win.webContents.executeJavaScript("window.Quarto01.setDiagnosticFabricMode('base')");
+    const cameraUnchanged = views.every(view => {
+      const frames = captures.filter(item => item.view === view);
+      const camera = JSON.stringify([frames[0].snapshot.cameraPosition, frames[0].snapshot.cameraQuaternion]);
+      return frames.every(item => JSON.stringify([item.snapshot.cameraPosition, item.snapshot.cameraQuaternion]) === camera);
+    });
+    const passed = captures.length === views.length * modes.length && captures.every(item => item.snapshot.ready && !item.snapshot.paused) &&
+      cameraUnchanged && !ERRORS.some(error => error.kind !== 'console-warning');
+    writeResult({ success: passed, test: BED_SURFACE_BASE_ONLY ? 'bed-and-wall-base-views' : 'bed-surface-same-camera-five-modes', initial, cameraUnchanged, captures, errors: ERRORS });
+    app.exit(passed ? 0 : 1);
+  } catch (error) {
+    writeResult({ success: false, test: 'bed-surface-same-camera-five-modes', message: String(error), errors: ERRORS });
+    app.exit(1);
+  }
+}
+
 async function runQualitySmoke(win) {
   try {
     await win.webContents.executeJavaScript(`(async () => {
@@ -363,7 +459,7 @@ async function runQualitySmoke(win) {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 720, minWidth: 900, minHeight: 600,
-    title: 'Quarto 01', backgroundColor: '#11110f', show: false,
+    title: BENCHMARK ? 'Quarto 01 — Teste automático' : 'Quarto 01', backgroundColor: '#11110f', show: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -379,6 +475,7 @@ function createWindow() {
   win.webContents.on('will-redirect', event => event.preventDefault());
   win.webContents.on('will-attach-webview', event => event.preventDefault());
   win.webContents.on('before-input-event', (event, input) => {
+    if (BENCHMARK) { event.preventDefault(); return; }
     if (input.type === 'keyDown' && input.key === 'F11') {
       event.preventDefault(); win.setFullScreen(!win.isFullScreen());
     }
@@ -404,8 +501,14 @@ function createWindow() {
   win.on('focus', () => notifyVisibility(false));
   win.on('restore', () => notifyVisibility(false));
   win.on('closed', () => { mainWindow = null; });
-  win.loadURL(APP_URL).then(() => {
-    if (CAPTURE_VIEWS_ONLY) runShadowCapture(win);
+  win.loadURL(APP_URL).then(async () => {
+    if (BENCHMARK) {
+      await win.webContents.executeJavaScript(INSTALL_DIAGNOSTIC_INPUT_GUARD);
+      win.setTitle('Quarto 01 — Teste automático');
+    }
+    if (BED_SURFACES) runBedSurfaceCapture(win);
+    else if (BED_BENCHMARK) runBedBenchmark(win);
+    else if (CAPTURE_VIEWS_ONLY) runShadowCapture(win);
     else if (SMOKE_PROFILE_CYCLE) runQualitySmoke(win);
     else if (BENCHMARK) runBenchmark(win);
   });

@@ -93,10 +93,12 @@ export class GpuTimer {
   }
   snapshot() {
     const sorted = this.samples.slice().sort((a, b) => a - b), count = sorted.length;
+    const recent = this.samples.slice(-16);
     return {
       available: Boolean(this.extension), samples: count,
       meanMs: count ? Math.round(sorted.reduce((a, b) => a + b, 0) / count * 100) / 100 : null,
       p95Ms: count ? Math.round(sorted[Math.ceil(count * .95) - 1] * 100) / 100 : null,
+      recentMeanMs: recent.length ? Math.round(recent.reduce((a, b) => a + b, 0) / recent.length * 100) / 100 : null,
     };
   }
 }

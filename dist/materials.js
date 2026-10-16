@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createFabricMaps, usePackedFabric } from './fabric.js';
 
 // Locally bundled photographic PBR maps. Source and CC0 license: ../ASSETS.md.
 const SETS = {
@@ -209,28 +210,24 @@ export async function createMaterials(renderer, onProgress = () => {}) {
     normalScale: new THREE.Vector2(0.08, 0.08),
     envMapIntensity: 0.3,
   });
-  const linen = neutralLinen(surface('Ivory linen', maps.linen, {
-    color: 0xdbd4c4,
+  const fabric = createFabricMaps(maps.linen, anisotropy);
+  const { packedRoughness, ...fabricMaps } = fabric;
+  const linen = usePackedFabric(surface('Soft ivory cotton with photographed weave', fabricMaps, {
+    color: 0xe0d9ca,
     roughness: 1,
-    normalScale: new THREE.Vector2(0.13, 0.13),
-    sheen: .18, sheenColor: 0xd0c5ad, sheenRoughness: .95,
-  }), 1.65);
+    normalScale: new THREE.Vector2(0.11, 0.11),
+    sheen: .18, sheenColor: 0xd7cebc, sheenRoughness: .95,
+  }), packedRoughness);
 
-  // Give the duvet a larger weave, independently of pillow and curtain UVs.
-  const blanketMaps = Object.fromEntries(Object.entries(maps.linen).map(([key, map]) => {
-    if (!map) return [key, null];
-    const copy = map.clone();
-    copy.repeat.set(2, 2);
-    copy.needsUpdate = true;
-    return [key, copy];
-  }));
-  const blanket = neutralLinen(surface('Weathered tobacco woven throw', blanketMaps, {
-    color: 0x898371,
-    roughness: 0.97,
-    normalScale: new THREE.Vector2(0.20, 0.20),
+  // Pillow, duvet and throw share their filtered scan and roughness channel.
+  // Their rest-space metre UVs retain the same yarn scale across sewn edges.
+  const blanket = usePackedFabric(surface('Weathered taupe woven throw', fabricMaps, {
+    color: 0x89806c,
+    roughness: 1,
+    normalScale: new THREE.Vector2(0.16, 0.16),
     side: THREE.DoubleSide,
     sheen: .23, sheenColor: 0xb9b29a, sheenRoughness: .98,
-  }), 1.7);
+  }), packedRoughness);
   const rug = surface('Worn charcoal rug', maps.carpet, {
     color: 0xcec2a5,
     roughness: 0.99,

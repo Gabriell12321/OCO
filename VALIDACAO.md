@@ -1,4 +1,78 @@
-# Validação da versão 0.6.1
+# Validação da versão 0.7.0
+
+Aplicativo Windows na Intel Iris Xe (D3D11/ANGLE), janela de 1900 × 977,
+perfil Desempenho, resolução interna fixa de 1004 × 516 e FXAA. Comparação
+com o aplicativo 0.6.1 preservado antes da alteração, usando as mesmas poses
+e o mesmo percurso de câmera. A resolução adaptativa ficou bloqueada na
+versão nova; a telemetria confirma o mesmo tamanho de imagem nas duas versões.
+
+Cada vista da cama foi medida por cinco segundos, após aquecimento. A vista
+direita fica imóvel; as outras fazem o mesmo giro suave. O tempo de GPU vem
+das consultas assíncronas já existentes, com cerca de vinte amostras por vista.
+
+| Vista | FPS 0.6.1 | FPS 0.7.0 | Quadro p95 antes → depois | GPU média antes → depois |
+| --- | ---: | ---: | ---: | ---: |
+| Lado direito | 55,04 | 59,97 | 33,2 → 16,8 ms | 13,98 → 9,54 ms |
+| Pés da cama | 59,08 | 60,03 | 17,0 → 16,8 ms | 14,61 → 9,01 ms |
+| Lado esquerdo | 56,94 | 60,04 | 32,8 → 16,9 ms | 15,32 → 9,48 ms |
+| Cobertor de perto | 59,02 | 59,99 | 16,9 → 16,9 ms | 11,51 → 9,32 ms |
+
+A vista inicial de controle foi excluída da comparação porque recebeu input
+físico durante a execução anterior; as quatro vistas da cama tiveram poses
+verificadas. O diagnóstico agora ignora input físico somente na janela de
+teste, mantendo os comandos sintéticos e o funcionamento normal do jogo.
+Os resultados são amostras curtas nesta máquina, limitadas pela apresentação
+a 60 Hz; não representam garantia de FPS em qualquer ambiente.
+
+O percurso de aproximadamente 35 segundos incluiu caminhada, corrida e
+movimento do mouse pelo controlador real. Nos 25 segundos de movimento:
+
+| Medida | Resultado |
+| --- | ---: |
+| FPS renderizados | 60,01 |
+| Tempo de quadro médio | 16,67 ms |
+| Tempo de quadro p95 / p99 | 16,8 / 17,0 ms |
+| CPU média | 3,20 ms |
+
+A sombra humana ligada/desligada produziu imagens idênticas nos três lados
+da cama, como esperado quando o jogador está além dela em relação à luz.
+Na parede, escureceu 203.167 pixels sem clarear nenhum. O deslocamento de
+0,901 metro junto à cama teve atraso espacial máximo de 1,86 cm; o retorno
+à parede passou. Não houve partículas nem erros no percurso.
+
+Os três perfis e o retorno a Desempenho passaram, usando HDR/AgX/FXAA.
+As nove verificações locais de arquivos, controles, corpo, cabeça, projeção,
+geometria da cama, tecido, engine e filtro de sombras passaram. O compilador
+Intel voltou a emitir o aviso já observado no FXAA vendorizado durante o
+teste da cama e a troca de perfis; não houve falha de compilação, JavaScript
+ou renderização. Relatórios adicionais: `v0.7.0-movement-release` e
+`v0.7.0-smoke-release`, dentro de `desktop/results/`.
+
+Mudanças verificadas no conteúdo e na renderização:
+
+- Tecidos: 90.000 → 34.934 triângulos, com cinco malhas. Cama completa com
+  41.340 triângulos; quarto com 140.088. A comparação com a superfície densa
+  de referência mede desvio máximo de aproximadamente 3,16 mm.
+- Costuras e abas nos travesseiros, dobras de tensão, bainhas e borda retornada
+  fina. Tecido com UV em metros, normal/rugosidade compartilhadas e mipmaps.
+- Compilação estática: 543 → 125 malhas, preservando 262.245 vértices
+  indexados, transformações e limites espaciais para descarte fora da câmera.
+- Filtro de sombra pontual ajustado ao plano receptor. A contraprova numérica
+  detecta 1.284 falsos sombreamentos no cálculo anterior e zero no novo, em
+  2.699 interseções; obstáculos reais continuam projetando sombra.
+- Capturas dos três lados confirmam a remoção das faixas no tecido, mantendo
+  sombras dos travesseiros e das dobras. O mapa estático do abajur passa a
+  1024 × 1024 por face, reutilizado entre quadros; o mapa humano continua
+  independente em 512 × 512. Pequenos degraus ainda aparecem em algumas
+  bordas no perfil Desempenho, com resolução interna de 1004 × 516.
+- OCO Engine 0.1: pipeline HDR/AgX/FXAA, lotes estáticos, filtro de sombras e
+  governador de resolução em módulos próprios, sobre Three.js/WebGL2.
+
+Os relatórios locais da comparação ficam em
+`desktop/results/v0.6.1-bed-baseline` e `desktop/results/v0.7.0-bed-release`.
+Os comandos de reprodução estão em `desktop/README.md`.
+
+## Referência da versão 0.6.1
 
 Teste no aplicativo Windows, Intel Iris Xe (D3D11/ANGLE), com resolução interna
 de 1004 × 516 no perfil Desempenho. O percurso de aproximadamente 35 segundos,

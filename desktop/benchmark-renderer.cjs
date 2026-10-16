@@ -150,8 +150,101 @@ async function runRendererBenchmark(requestedQuality) {
   };
 }
 
+async function prepareBedBenchmark(quality) {
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const deadline = performance.now() + 90000;
+  while (!window.Quarto01?.ready || !document.body.classList.contains('ready')) {
+    if (performance.now() > deadline) throw new Error('O quarto não terminou de carregar.');
+    if (!document.getElementById('errorPanel').classList.contains('hidden')) throw new Error(document.getElementById('errorText').textContent);
+    await delay(200);
+  }
+  const room = window.Quarto01;
+  room.setQuality(quality || 'performance');
+  if (typeof room.setDiagnosticResolutionLock === 'function') room.setDiagnosticResolutionLock(true);
+  await delay(5200);
+  const gl = document.getElementById('scene').getContext('webgl2');
+  const debug = gl.getExtension('WEBGL_debug_renderer_info');
+  return { version: room.version, snapshot: room.getPerformanceSnapshot(),
+    viewport: { width: innerWidth, height: innerHeight, devicePixelRatio },
+    activeWebGL: { renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+      vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR) } };
+}
+
+async function runBedPhase(plan) {
+  const room = window.Quarto01, gl = document.getElementById('scene').getContext('webgl2');
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  function pose() {
+    if (!room.setDiagnosticView(plan.view)) throw new Error('Pose inválida: ' + plan.view);
+    if (plan.pitchInput) room.diagnosticLook(0, plan.pitchInput);
+  }
+  pose(); await delay(250);
+  const before = room.getPerformanceSnapshot(), gpuTimes = [], telemetry = [];
+  const originalQuery = gl.getQueryParameter;
+  // Observe the existing nonblocking timer only after its result is available.
+  // No new GPU queries, gl.finish(), or query-result waits are introduced.
+  gl.getQueryParameter = function(query, parameter) {
+    const result = originalQuery.call(this, query, parameter);
+    if (parameter === gl.QUERY_RESULT && typeof result === 'number' && result > 0 && result < 1e9) gpuTimes.push(result / 1e6);
+    return result;
+  };
+  const started = performance.now();
+  let lastYaw = 0, lastPitch = 0, lastSample = -Infinity, lookInputs = 0;
+  try {
+    while (performance.now() - started < plan.duration) {
+      const elapsed = performance.now() - started;
+      if (plan.turn) {
+        const phase = elapsed / plan.duration * Math.PI * 2;
+        const yaw = Math.sin(phase) * .24, pitch = Math.sin(phase * 2) * .055;
+        room.diagnosticLook(-(yaw - lastYaw) / .0022, -(pitch - lastPitch) / .0022);
+        lastYaw = yaw; lastPitch = pitch; lookInputs++;
+      }
+      if (elapsed - lastSample >= 500) {
+        const s = room.getPerformanceSnapshot();
+        telemetry.push({ elapsedMs: elapsed, width: s.drawingBufferWidth, height: s.drawingBufferHeight,
+          adaptiveScale: s.adaptiveScale, cameraQuaternion: s.cameraQuaternion, playerPosition: s.playerPosition,
+          yaw: s.cameraYaw, pitch: s.cameraPitch });
+        lastSample = elapsed;
+      }
+      await frame();
+    }
+  } finally { gl.getQueryParameter = originalQuery; }
+  const elapsedMs = performance.now() - started, after = room.getPerformanceSnapshot();
+  const count = after.totalFrames - before.totalFrames, trace = room.getPerformanceTrace();
+  if (count <= 0 || trace.frameTimes.length < count || trace.cpuTimes.length < count) throw new Error('Amostra incompleta da vista ' + plan.id);
+  const frameTimes = trace.frameTimes.slice(-count), cpuTimes = trace.cpuTimes.slice(-count);
+  const round = value => Math.round(value * 100) / 100;
+  const summarize = values => {
+    const sorted = values.slice().sort((a, b) => a - b);
+    const at = p => sorted.length ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)] : 0;
+    return { samples: values.length, meanMs: round(values.reduce((a, b) => a + b, 0) / Math.max(1, values.length)),
+      p95Ms: round(at(.95)), p99Ms: round(at(.99)) };
+  };
+  const fixedResolution = telemetry.every(s => s.width === before.drawingBufferWidth && s.height === before.drawingBufferHeight) &&
+    after.drawingBufferWidth === before.drawingBufferWidth && after.drawingBufferHeight === before.drawingBufferHeight;
+  const poseVerified = Math.hypot(after.playerPosition.x - before.playerPosition.x,
+    after.playerPosition.z - before.playerPosition.z) < .001 &&
+    Math.abs(after.cameraYaw - before.cameraYaw - lastYaw) < .002 &&
+    Math.abs(after.cameraPitch - before.cameraPitch - lastPitch) < .002;
+  const result = { id: plan.id, view: plan.view, version: room.version, durationMs: round(elapsedMs),
+    frames: count, renderedFPS: round(count * 1000 / elapsedMs), frame: summarize(frameTimes),
+    cpu: summarize(cpuTimes), gpu: { available: before.gpuTiming?.available === true, ...summarize(gpuTimes) },
+    fixedResolution, poseVerified, lookInputs, turningVerified: !plan.turn || new Set(telemetry.map(s => JSON.stringify(s.cameraQuaternion))).size > 3,
+    before, after, telemetry, frameTimes, cpuTimes, gpuTimes };
+  // Every before/after screenshot uses the exact same camera, independent of
+  // the number of frames rendered during the sweep.
+  pose(); await delay(250);
+  return result;
+}
+
 module.exports = {
   buildBenchmarkScript(quality) {
     return '(' + runRendererBenchmark.toString() + ')(' + JSON.stringify(quality) + ')';
+  },
+  buildBedPrepareScript(quality) {
+    return '(' + prepareBedBenchmark.toString() + ')(' + JSON.stringify(quality) + ')';
+  },
+  buildBedPhaseScript(plan) {
+    return '(' + runBedPhase.toString() + ')(' + JSON.stringify(plan) + ')';
   },
 };

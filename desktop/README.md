@@ -1,6 +1,6 @@
 # Quarto 01 para Windows
 
-Versão 0.6.1, exclusivamente em primeira pessoa. Empacotamento portátil com
+Versão 0.7.0, exclusivamente em primeira pessoa. Empacotamento portátil com
 Electron oficial 44.7.2 para Windows x64. O usuário
 abre `Quarto 01.exe`; Node, navegador, instalação e internet não são necessários.
 
@@ -23,6 +23,7 @@ SHA256 contra o valor publicado no `SHASUMS256.txt` da versão fixa. Não instal
 pacotes, não modifica a política de execução do Windows e não altera o sistema.
 
 Saídas: `../Windows/Quarto 01/Quarto 01.exe` e `../Quarto 01 Windows.zip`.
+O pacote inclui a descrição da OCO Room Engine em `DOCUMENTACAO/ENGINE.md`.
 
 `--refresh` atualiza o conteúdo usando o runtime que já foi extraído. `--skip-zip`
 omite a compactação durante as iterações de desenvolvimento.
@@ -62,6 +63,18 @@ na parede e nos três lados da cama. O teste também anda para frente e para
 trás ao lado da cama, mede a distância entre jogador e projeção, retorna à
 parede e captura o quarto, o cobertor e os pés nas vistas frontal e oblíqua.
 Essas comparações também acompanham o benchmark de 35 segundos.
+
+`--benchmark-bed` mede a vista inicial por 3 segundos e quatro vistas da cama
+por 5 segundos cada: lado direito, pés, lado esquerdo e cobertor de perto.
+As três últimas incluem rotação suave da câmera. Cada vista informa FPS,
+tempos de quadro, CPU e GPU por consulta assíncrona já existente; a captura
+retorna à mesma pose exata para facilitar comparações. O teste verifica que
+a resolução interna permaneceu fixa, bloqueando a adaptação quando a engine
+oferece essa opção de diagnóstico. O resultado inclui os cinco PNGs.
+`--capture-bed-surfaces` compara os lados esquerdo e frontal da cama em cinco
+modos de material/sombra, mantendo a câmera imóvel para investigar artefatos.
+`--capture-bed-base` captura somente o resultado normal nos três lados da cama
+e na parede com a sombra do jogador.
 
 Se o shell de desenvolvimento herdou `ELECTRON_RUN_AS_NODE=1`, remova essa
 variável apenas do processo que iniciará o teste. O atalho `ABRIR QUARTO.cmd`

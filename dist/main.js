@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { FXAAPass } from 'three/addons/postprocessing/FXAAPass.js';
+import { createRenderPipeline } from './engine/render-pipeline.js';
+import { compileStaticScene } from './engine/static-scene.js';
+import { ResolutionGovernor } from './engine/resolution-governor.js';
+import { createShadowChunk } from './engine/shadow-filter.js';
 import { createMaterials } from './materials.js';
 import { createRoom } from './room.js';
 import { createControls } from './controls.js';
@@ -18,55 +19,26 @@ const qualityStatus = document.getElementById('qualityStatus');
 const monitor = new PerformanceMonitor();
 let renderer, controls, room, scene, camera, frameHandle = 0;
 let playerShadow, gpuTimer;
-let qualityTarget = null, outputPass = null, displayTarget = null, fxaaPass = null;
+let pipeline, staticSceneStats;
+const resolutionGovernor = new ResolutionGovernor();
+let diagnosticResolutionLock = false;
+const diagnosticFabricState = new Map();
 const diagnosticQuery = Boolean(window.desktopDiagnostics) ? new URLSearchParams(location.search) : new URLSearchParams();
 const useFXAA = diagnosticQuery.get('fxaa') !== '0';
 let quality = 'performance', ready = false, desktopPaused = false;
-let adaptiveScale = 1, lowWindows = 0, highWindows = 0;
+let adaptiveScale = 1;
 let previousTick = 0, previousRender = 0, accumulator = 0, elapsed = 0;
-let nextAdaptation = 0;
 const shadowLights = [];
 const lightingProfiles = { full: [], efficient: [] };
 const surfaceProfiles = new Map();
 let gpuRenderer = '', gpuVendor = '', msaaSamples = 0;
 const STEP_MS = 1000 / 60;
+const LAMP_SHADOW = Object.freeze({ bias: -.0005, normalBias: .012, radius: 4.2 });
+const LAMP_SHADOW_SIZE = 1024;
 
-// Keep soft shadows while avoiding the stock 16 directional + 9 cube-map
-// comparisons per fragment on integrated GPUs. The quality profile retains
-// Three's full filter. Original functions are dead-code-eliminated by GLSL.
-const efficientShadowChunk = THREE.ShaderChunk.shadowmap_pars_fragment
-  .replace('float getShadow(', 'float getShadowFull(')
-  .replace('float getPointShadow(', 'float getPointShadowFull(') + `
-#ifdef USE_SHADOWMAP
-float getShadow(sampler2D shadowMap, vec2 shadowMapSize, float shadowIntensity,
-    float shadowBias, float shadowRadius, vec4 shadowCoord) {
-  shadowCoord.xyz /= shadowCoord.w;
-  shadowCoord.z += shadowBias;
-  if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 || shadowCoord.y < 0.0 ||
-      shadowCoord.y > 1.0 || shadowCoord.z > 1.0) return 1.0;
-  vec2 o = vec2(.75) / shadowMapSize;
-  float value = texture2DCompare(shadowMap, shadowCoord.xy + vec2(-o.x,-o.y), shadowCoord.z)
-    + texture2DCompare(shadowMap, shadowCoord.xy + vec2(o.x,-o.y), shadowCoord.z)
-    + texture2DCompare(shadowMap, shadowCoord.xy + vec2(-o.x,o.y), shadowCoord.z)
-    + texture2DCompare(shadowMap, shadowCoord.xy + vec2(o.x,o.y), shadowCoord.z);
-  return mix(1.0, value * .25, shadowIntensity);
-}
-float getPointShadow(sampler2D shadowMap, vec2 shadowMapSize, float shadowIntensity,
-    float shadowBias, float shadowRadius, vec4 shadowCoord, float shadowCameraNear, float shadowCameraFar) {
-  float distanceToLight = length(shadowCoord.xyz);
-  if (distanceToLight < shadowCameraNear || distanceToLight > shadowCameraFar) return 1.0;
-  float depth = (distanceToLight - shadowCameraNear) / (shadowCameraFar - shadowCameraNear) + shadowBias;
-  vec3 direction = normalize(shadowCoord.xyz);
-  float texel = 1.0 / (shadowMapSize.y * 2.0);
-  float o = shadowRadius * texel;
-  float value = texture2DCompare(shadowMap, cubeToUV(direction + vec3(-o,-o,o), texel), depth)
-    + texture2DCompare(shadowMap, cubeToUV(direction + vec3(-o,o,-o), texel), depth)
-    + texture2DCompare(shadowMap, cubeToUV(direction + vec3(o,-o,-o), texel), depth)
-    + texture2DCompare(shadowMap, cubeToUV(direction + vec3(o,o,o), texel), depth);
-  return mix(1.0, value * .25, shadowIntensity);
-}
-#endif
-`;
+// OCO point-light filtering accounts for the receiver plane at each tap.
+const efficientShadowChunk = createShadowChunk(false);
+const fullShadowChunk = createShadowChunk(true);
 
 function registerSurfaceProfiles() {
   scene.traverse(object => {
@@ -78,7 +50,7 @@ function registerSurfaceProfiles() {
       const originalKey = material.customProgramCacheKey();
       material.onBeforeCompile = function (shader, context) {
         originalCompile.call(this, shader, context);
-        const chunk = quality === 'quality' ? THREE.ShaderChunk.shadowmap_pars_fragment : efficientShadowChunk;
+        const chunk = quality === 'quality' ? fullShadowChunk : efficientShadowChunk;
         if (playerShadow) playerShadow.patchShader(shader, chunk);
         else shader.fragmentShader = shader.fragmentShader.replace('#include <shadowmap_pars_fragment>', chunk);
       };
@@ -95,36 +67,6 @@ function applyLightingProfile() {
     if (material.isMeshPhysicalMaterial) material.sheen = full ? original.sheen : 0;
     material.needsUpdate = true;
   }
-}
-
-function optimizeStaticGeometry() {
-  scene.updateMatrixWorld(true);
-  const groups = new Map(), obsolete = new Set();
-  scene.traverse(object => {
-    if (!object.isMesh || Array.isArray(object.material) || object.material.transparent) return;
-    const key = object.material.uuid + ':' + object.castShadow + ':' + object.receiveShadow;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(object);
-  });
-  for (const objects of groups.values()) {
-    if (objects.length < 3) continue;
-    const geometries = objects.map(object => {
-      const geometry = object.geometry.index ? object.geometry.toNonIndexed() : object.geometry.clone();
-      geometry.applyMatrix4(object.matrixWorld);
-      return geometry;
-    });
-    const combined = mergeGeometries(geometries, false);
-    geometries.forEach(geometry => geometry.dispose());
-    if (!combined) continue;
-    combined.computeBoundingBox(); combined.computeBoundingSphere();
-    const mesh = new THREE.Mesh(combined, objects[0].material);
-    mesh.castShadow = objects[0].castShadow; mesh.receiveShadow = objects[0].receiveShadow;
-    mesh.name = 'Static room surfaces'; scene.add(mesh);
-    objects.forEach(object => { obsolete.add(object.geometry); object.removeFromParent(); });
-  }
-  // Some details share geometry. Free only resources no retained mesh uses.
-  scene.traverse(object => { if (object.isMesh) obsolete.delete(object.geometry); });
-  obsolete.forEach(geometry => geometry.dispose());
 }
 
 function simplifyMaterials() {
@@ -170,9 +112,9 @@ function addLighting() {
   scene.add(moon, moon.target);
   const lamp = new THREE.PointLight(0xffd1a0, 5.8, 6, 2);
   lamp.position.copy(room.lampPosition); lamp.castShadow = true;
-  lamp.shadow.mapSize.set(512, 512);
+  lamp.shadow.mapSize.set(LAMP_SHADOW_SIZE, LAMP_SHADOW_SIZE);
   lamp.shadow.camera.near = .04; lamp.shadow.camera.far = 8;
-  lamp.shadow.normalBias = .006; lamp.shadow.bias = -.00012; lamp.shadow.radius = 4.2;
+  Object.assign(lamp.shadow, LAMP_SHADOW);
   scene.add(lamp);
   shadowLights.push(moon, lamp);
   const bounce = new THREE.RectAreaLight(0xffd9b1, .55, .65, .45);
@@ -191,47 +133,10 @@ function resizeDrawingBuffer() {
   const { width, height } = drawingSize(innerWidth, innerHeight, devicePixelRatio, quality, adaptiveScale);
   renderer.setPixelRatio(1); renderer.setSize(width, height, false);
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  if (useFXAA || quality === 'quality') {
-    if (!qualityTarget) {
-      // Tone mapping must precede FXAA: its edge detector expects display
-      // luminance. Keep the room linear HDR until OutputPass, with no MSAA.
-      qualityTarget = new THREE.WebGLRenderTarget(width, height, {
-        type: THREE.HalfFloatType, samples: useFXAA ? 0 : Math.min(4, renderer.capabilities.maxSamples),
-        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
-        depthBuffer: true, stencilBuffer: false, generateMipmaps: false,
-      });
-      qualityTarget.texture.name = useFXAA ? 'Room linear HDR before tone mapping' : 'Quality HDR multisample resolve';
-      qualityTarget.texture.colorSpace = THREE.LinearSRGBColorSpace;
-      outputPass = new OutputPass(); outputPass.renderToScreen = !useFXAA;
-      if (useFXAA) {
-        displayTarget = new THREE.WebGLRenderTarget(width, height, {
-          type: THREE.UnsignedByteType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
-          depthBuffer: false, stencilBuffer: false, generateMipmaps: false,
-        });
-        // OutputPass writes sRGB-encoded values here. NoColorSpace prevents
-        // the next texture fetch from silently decoding them back to linear.
-        displayTarget.texture.name = 'Display luminance for FXAA';
-        displayTarget.texture.colorSpace = THREE.NoColorSpace;
-        fxaaPass = new FXAAPass(); fxaaPass.renderToScreen = true;
-      }
-    } else qualityTarget.setSize(width, height);
-    displayTarget?.setSize(width, height); fxaaPass?.setSize(width, height);
-  } else if (qualityTarget) {
-    renderer.setRenderTarget(null);
-    qualityTarget.dispose(); outputPass.dispose(); displayTarget?.dispose(); fxaaPass?.dispose();
-    qualityTarget = outputPass = displayTarget = fxaaPass = null;
-  }
+  pipeline?.resize(width, height, quality);
 }
 
-function renderRoom() {
-  if (qualityTarget) {
-    renderer.setRenderTarget(qualityTarget); renderer.render(scene, camera);
-    outputPass.render(renderer, displayTarget, qualityTarget);
-    if (fxaaPass) fxaaPass.render(renderer, null, displayTarget);
-  } else {
-    renderer.setRenderTarget(null); renderer.render(scene, camera);
-  }
-}
+function renderRoom() { pipeline.render(scene, camera); }
 
 function cacheShadows() {
   // Furniture and lights never move. Their seven shadow views are computed only
@@ -239,7 +144,7 @@ function cacheShadows() {
   renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true;
   const size = quality === 'quality' ? 2048 : 1024;
   for (const light of shadowLights) {
-    const mapSize = light.isDirectionalLight ? size : 512;
+    const mapSize = light.isDirectionalLight ? size : LAMP_SHADOW_SIZE;
     if (light.shadow.mapSize.x !== mapSize) {
       light.shadow.map?.dispose(); light.shadow.map = null;
       light.shadow.mapSize.set(mapSize, mapSize);
@@ -250,8 +155,8 @@ function cacheShadows() {
 
 function setQuality(value) {
   if (!PROFILES[value]) return;
-  quality = value; adaptiveScale = 1; lowWindows = highWindows = 0;
-  nextAdaptation = performance.now() + 5000;
+  quality = value; adaptiveScale = 1;
+  resolutionGovernor.reset(performance.now());
   if (qualityButton) {
     qualityButton.textContent = PROFILES[quality].label;
     qualityButton.setAttribute('aria-label', 'Qualidade: ' + PROFILES[quality].label + '. Clique para alternar.');
@@ -267,19 +172,16 @@ function getPerformanceSnapshot() {
   const stats = monitor.snapshot();
   const width = renderer?.domElement.width || 0, height = renderer?.domElement.height || 0;
   return {
-    ...stats, version: '0.6.1', ready, quality, qualityLabel: PROFILES[quality].label,
+    ...stats, version: '0.7.0', ready, quality, qualityLabel: PROFILES[quality].label,
     character: false, firstPersonOnly: true,
-    renderer: 'WebGL2', pathTracing: false, postprocessing: Boolean(qualityTarget), shadows: 'cached',
-    gpuRenderer, gpuVendor, msaaSamples: qualityTarget ? qualityTarget.samples : msaaSamples,
-    contextMsaaSamples: msaaSamples,
-    renderTargetSamples: qualityTarget?.samples || 0,
-    renderPath: fxaaPass ? 'hdr-output-fxaa' : qualityTarget ? 'hdr-msaa-output' : 'direct',
-    colorPasses: fxaaPass ? 3 : qualityTarget ? 2 : 1,
-    antialiasing: fxaaPass ? 'fxaa' : (qualityTarget?.samples || msaaSamples) > 0 ? 'msaa' : 'none',
-    resolve: fxaaPass ? 'fxaa-after-tone-mapping' : qualityTarget ? 'hardware-msaa' : 'none',
+    renderer: 'WebGL2', pathTracing: false, shadows: 'cached',
+    engine: 'OCO', engineBackend: 'Three.js / WebGL2', engineVersion: '0.1',
+    staticScene: staticSceneStats || null, bed: room?.bedMetrics || null,
+    gpuRenderer, gpuVendor,
+    ...pipeline?.snapshot(msaaSamples),
     gpuTiming: gpuTimer?.snapshot() || null,
     playerShadow: playerShadow?.snapshot() || { active: false },
-    shadowFilter: quality === 'quality' ? 'full-pcf' : 'four-tap-soft',
+    shadowFilter: quality === 'quality' ? 'receiver-plane-nine-tap' : 'receiver-plane-four-tap',
     areaLights: quality === 'quality' ? 2 : 0,
     adaptiveScale: Math.round(adaptiveScale * 100) / 100,
     drawingBufferWidth: width, drawingBufferHeight: height, width, height,
@@ -298,18 +200,14 @@ function getPerformanceSnapshot() {
 }
 
 function updateDiagnostics(now) {
-  if (now >= nextAdaptation && monitor.fps > 0) {
-    lowWindows = monitor.fps < 48 ? lowWindows + 1 : 0;
-    highWindows = monitor.fps > 58 ? highWindows + 1 : 0;
-    const minimum = Math.min(1, Math.sqrt(PROFILES.performance.pixels / PROFILES[quality].pixels));
-    if (lowWindows >= 2 && adaptiveScale > minimum + .01) {
-      adaptiveScale = Math.max(minimum, adaptiveScale * .85);
-      lowWindows = highWindows = 0; resizeDrawingBuffer();
-    } else if (highWindows >= 10 && adaptiveScale < .99) {
-      adaptiveScale = Math.min(1, adaptiveScale / .9);
-      lowWindows = highWindows = 0; resizeDrawingBuffer();
-    }
+  const baseSize = drawingSize(innerWidth, innerHeight, devicePixelRatio, quality, 1);
+  const scale = resolutionGovernor.update({ now, fps: monitor.fps,
+    gpuMs: gpuTimer?.snapshot().recentMeanMs, pixels: baseSize.width * baseSize.height,
+    enabled: !diagnosticResolutionLock });
+  if (Math.abs(scale - adaptiveScale) > .001) {
+    adaptiveScale = scale; resizeDrawingBuffer();
   }
+
   const metrics = getPerformanceSnapshot();
   if (qualityStatus) qualityStatus.textContent = `${Math.round(metrics.fps)} FPS · ${metrics.width} × ${metrics.height}`;
   window.desktopDiagnostics?.report?.(metrics);
@@ -348,7 +246,7 @@ function frame(now) {
 }
 
 window.Quarto01 = {
-  version: '0.6.1', renderer: 'WebGL2', character: false, firstPersonOnly: true,
+  version: '0.7.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
   get ready() { return ready; }, get quality() { return quality; }, get fps() { return monitor.fps; },
   get frameTimes() { return monitor.frameTimes.slice(); },
   get renderStats() { return renderer ? { ...renderer.info.render } : {}; },
@@ -357,6 +255,32 @@ window.Quarto01 = {
   diagnosticLook: (dx, dy) => controls?.diagnosticLook?.(dx, dy),
   setDiagnosticShadowEnabled: value => playerShadow?.setEnabled(value),
   setDiagnosticView: setDiagnosticView,
+  setDiagnosticFabricMode: mode => {
+    if (!window.desktopDiagnostics || !ready || !['base', 'normal-off', 'receive-shadow-off', 'shadow-bias', 'shadow-filter'].includes(mode)) return false;
+    // Save every shared material's initial state before changing any instance.
+    scene.traverse(object => {
+      if (!object.isMesh || !object.material?.userData.packedFabric) return;
+      if (!diagnosticFabricState.has(object)) diagnosticFabricState.set(object, {
+        receiveShadow: object.receiveShadow, normalScale: object.material.normalScale.clone(),
+      });
+    });
+    for (const [object, original] of diagnosticFabricState) {
+      object.receiveShadow = mode === 'receive-shadow-off' ? false : original.receiveShadow;
+      object.material.normalScale.copy(original.normalScale);
+      if (mode === 'normal-off') object.material.normalScale.set(0, 0);
+    }
+    const lamp = shadowLights.find(light => light.isPointLight);
+    Object.assign(lamp.shadow, LAMP_SHADOW);
+    if (mode === 'shadow-filter') lamp.shadow.radius = 1.5;
+    cacheShadows();
+    return true;
+  },
+  setDiagnosticResolutionLock: value => {
+    if (!window.desktopDiagnostics) return false;
+    diagnosticResolutionLock = Boolean(value);
+    resolutionGovernor.reset(performance.now()); adaptiveScale = 1; resizeDrawingBuffer();
+    return true;
+  },
 };
 
 function setDiagnosticView(id) {
@@ -380,6 +304,7 @@ async function init() {
   // Desktop A/B can compare the same scene with ?fxaa=0 and optionally msaa=4.
   const diagnosticMSAA4 = !useFXAA && diagnosticQuery.get('msaa') === '4';
   renderer = new THREE.WebGLRenderer({ canvas, antialias: diagnosticMSAA4, powerPreference: 'high-performance', alpha: false });
+  pipeline = createRenderPipeline(renderer, { fxaa: useFXAA });
   const gl = renderer.getContext(), debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
   gpuRenderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
   gpuVendor = debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
@@ -408,7 +333,8 @@ async function init() {
     scene.environmentRotation.y = scene.backgroundRotation.y = .7;
   }
   label.textContent = 'Preparando os materiais do quarto...'; progress.style.width = '72%';
-  room = createRoom(scene, materials); simplifyMaterials(); optimizeStaticGeometry(); addLighting();
+  room = createRoom(scene, materials); simplifyMaterials();
+  staticSceneStats = compileStaticScene(scene); addLighting();
   playerShadow = createPlayerShadow(renderer, room.lampPosition);
   registerSurfaceProfiles(); applyLightingProfile();
   controls = createControls(camera, canvas, room.colliders);
@@ -437,7 +363,7 @@ async function init() {
     event.preventDefault(); pause(); ready = false;
     showError('A renderização foi interrompida. Reabra o quarto para continuar.');
   });
-  ready = true; monitor.start(performance.now()); nextAdaptation = performance.now() + 5000;
+  ready = true; monitor.start(performance.now()); resolutionGovernor.reset(performance.now());
   progress.style.width = '100%'; document.getElementById('loading').classList.add('hidden');
   document.body.classList.add('ready'); resume();
   window.desktopDiagnostics?.report?.(getPerformanceSnapshot());

@@ -1,4 +1,4 @@
-QUARTO 01 — WINDOWS 64 BITS — VERSÃO 0.6.1
+QUARTO 01 — WINDOWS 64 BITS — VERSÃO 0.7.0
 
 1. Extraia a pasta inteira se estiver abrindo o arquivo ZIP.
 2. Abra "Quarto 01.exe" dentro da pasta "Quarto 01".
@@ -22,8 +22,8 @@ Este é um aplicativo independente para Windows com um quarto realista,
 explorado exclusivamente em primeira pessoa. A sombra usa uma malha humana,
 com pés anatômicos e uma passada ligada à distância realmente percorrida.
 A caminhada tem aceleração gradual, frenagem e movimento discreto da câmera.
-Esta atualização corrige a cabeça e a projeção da sombra perto da cama.
-As partículas flutuantes foram removidas.
+Os tecidos da cama têm acabamento revisado, dobras e caimento mais naturais.
+A resolução se ajusta às quedas de fluidez ao olhar para a cama.
 A taxa de quadros depende da placa de vídeo e da resolução escolhida.
 
 Licenças do Electron e do Chromium acompanham a pasta. Os créditos dos

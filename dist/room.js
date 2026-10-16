@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { createBedding } from './bedroom/bed.js';
 
 // A quiet, occupied bedroom. All measurements are in metres.
 export function createRoom(scene, materials) {
@@ -213,6 +213,7 @@ export function createRoom(scene, materials) {
 
   // Bed: a real layered silhouette, exposed frame and deliberately imperfect linens.
   const bedX = -.97, bedZ = -1.58, bedHead = bedZ - 1.243;
+  const bedStart = room.children.length;
   block(bedX, bedZ, 1.96, 2.43, .07);
   contact(bedX, bedZ, 2.5, 2.95, .3);
   for (const x of [bedX - .79, bedX + .79]) for (const z of [bedZ - .93, bedZ + .93]) {
@@ -221,7 +222,15 @@ export function createRoom(scene, materials) {
   }
   box(1.91, .21, 2.4, bedX, .285, bedZ, M.wood, .028);
   box(1.79, .13, 2.28, bedX, .42, bedZ, M.dark, .035);
-  box(1.86, .22, 2.31, bedX, .505, bedZ, M.linen, .075);
+  const mattress = box(1.86, .22, 2.31, bedX, .505, bedZ, M.linen, .075);
+  mattress.name = 'Mattress with fitted cotton sheet'; mattress.userData.bedPart = 'mattress';
+  const mattressPosition = mattress.geometry.attributes.position, mattressNormal = mattress.geometry.attributes.normal;
+  const mattressUV = mattress.geometry.attributes.uv;
+  for (let i = 0; i < mattressPosition.count; i++) {
+    const nx = Math.abs(mattressNormal.getX(i)), ny = Math.abs(mattressNormal.getY(i)), nz = Math.abs(mattressNormal.getZ(i));
+    const x = mattressPosition.getX(i), y = mattressPosition.getY(i), z = mattressPosition.getZ(i);
+    mattressUV.setXY(i, nx > ny && nx > nz ? z : x, ny > nx && ny > nz ? z : y);
+  }
   // Piping catches small highlights around the mattress.
   roundedOutline(1.866, 2.316, .07, bedX, .565, bedZ, .004, cottonStitch);
   roundedOutline(1.868, 2.316, .07, bedX, .452, bedZ, .004, cottonStitch);
@@ -235,12 +244,15 @@ export function createRoom(scene, materials) {
   for (const x of [bedX - .59, bedX, bedX + .59]) {
     const button = mesh(new THREE.SphereGeometry(.016, 12, 8), M.dark, x, .78, bedHead + .124); button.scale.z = .3;
   }
-  // Irregular pillows are sewn closed, slightly sunken and asymmetrically placed.
-  pillow(bedX - .46, .687, bedZ - .82, -.055);
-  pillow(bedX + .41, .69, bedZ - .86, .09);
-  // Top surface and dropped sides are connected so the blanket never reads as a cuboid.
-  const bedding = duvet(bedX, bedZ);
-  wovenThrow(bedding);
+  const bedding = createBedding(room, M, bedX, bedZ);
+  const bedMetrics = { ...bedding.metrics, textileTriangles: bedding.metrics.triangles, triangles: 0, meshes: 0 };
+  for (const child of room.children.slice(bedStart)) child.traverse(object => {
+    if (!object.isMesh) return;
+    object.userData.bedPart ||= 'frame';
+    object.name ||= 'Walnut bed frame and sewn mattress piping';
+    bedMetrics.triangles += (object.geometry.index?.count || object.geometry.attributes.position.count) / 3;
+    bedMetrics.meshes++;
+  });
 
   // Bedside cabinet, three inset drawers, handles, a lamp, a book and drinking glass.
   const bedsideX = .4, bedsideZ = -2.58;
@@ -416,7 +428,7 @@ export function createRoom(scene, materials) {
   // Faded photographs in layered timber frames. No supernatural props or UI.
   picture(-2.974, 1.72, -1.58, .55, .73, Math.PI / 2, 1);
   picture(2.974, 1.85, 1.47, .62, .46, -Math.PI / 2, 2);
-  return { colliders, lampPosition: new THREE.Vector3(bedsideX, 1.075, lampZ), windowPosition: new THREE.Vector3(.4, 1.775, -3.18), updates: [] };
+  return { colliders, bedMetrics, lampPosition: new THREE.Vector3(bedsideX, 1.075, lampZ), windowPosition: new THREE.Vector3(.4, 1.775, -3.18), updates: [] };
 
   function roundedOutline(width, depth, radius, cx, y, cz, thickness, material) {
     const shape = new THREE.Shape();
@@ -432,220 +444,6 @@ export function createRoom(scene, materials) {
     const pts = shape.getPoints(100).map(p => new THREE.Vector3(p.x + cx, y, p.y + cz));
     const curve = new THREE.CatmullRomCurve3(pts, true);
     mesh(new THREE.TubeGeometry(curve, 100, thickness, 5, true), material, 0, 0, 0);
-  }
-  function pillow(x, y, z, angle) {
-    const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = angle; room.add(g);
-    const geometry = new THREE.SphereGeometry(1, 64, 40);
-    const p = geometry.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const nx = p.getX(i), ny = p.getY(i), nz = p.getZ(i);
-      // Superellipse profile: rounded corners, broad flattened sleeping surface.
-      const px = Math.sign(nx) * Math.pow(Math.abs(nx), .46) * .38;
-      const pz = Math.sign(nz) * Math.pow(Math.abs(nz), .49) * .235;
-      const depression = Math.exp(-((px + .025) ** 2 / .018 + (pz - .025) ** 2 / .009)) * .026 * Math.max(0, ny);
-      const seamGather = Math.exp(-((Math.abs(px) - .315) ** 2) / .0012);
-      const wrinkles = (Math.sin(pz * 79 + px * 7) + Math.sin(pz * 43 - px * 13) * .5) * .0023 * seamGather;
-      const subtleCrumple = Math.sin(px * 14 + pz * 23) * .002 * Math.max(0, ny);
-      p.setXYZ(i, px, ny * .085 - depression + wrinkles + subtleCrumple, pz);
-    }
-    geometry.computeVertexNormals(); mesh(geometry, M.linen, 0, 0, 0, g);
-    const seamPoints = [];
-    for (let i = 0; i <= 90; i++) {
-      const a = i / 90 * Math.PI * 2;
-      seamPoints.push(point(Math.sign(Math.cos(a)) * Math.pow(Math.abs(Math.cos(a)), .46) * .381, -.004, Math.sign(Math.sin(a)) * Math.pow(Math.abs(Math.sin(a)), .49) * .236));
-    }
-    const curve = new THREE.CatmullRomCurve3(seamPoints, true);
-    mesh(new THREE.TubeGeometry(curve, 90, .0023, 4, true), cottonStitch, 0, 0, 0, g);
-    g.rotation.x = -.09;
-  }
-  function smooth01(value) {
-    const t = THREE.MathUtils.clamp(value, 0, 1);
-    return t * t * (3 - 2 * t);
-  }
-  function sampleAxis(parts) {
-    const result = [];
-    for (const [start, end, segments] of parts) {
-      for (let i = 0; i < segments; i++) result.push(start + (end - start) * i / segments);
-    }
-    result.push(parts[parts.length - 1][1]);
-    return result;
-  }
-  function clothGrid(xs, zs, sample, uvSize = 2.1, restUV = (x, z) => [x, z]) {
-    const positions = [], uvs = [], indices = [];
-    for (const z of zs) for (const x of xs) {
-      const p = sample(x, z);
-      positions.push(p.x, p.y, p.z);
-      // Rest-space UVs keep the linen weave the same size over curved edges.
-      const [restX, restZ] = restUV(x, z);
-      uvs.push((restX + 1.25) / uvSize, (restZ + .82) / uvSize);
-    }
-    const stride = xs.length;
-    for (let j = 0; j < zs.length - 1; j++) for (let i = 0; i < stride - 1; i++) {
-      const a = j * stride + i, b = a + 1, c = a + stride, d = c + 1;
-      indices.push(a, c, b, b, c, d);
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geometry.setIndex(indices); geometry.computeVertexNormals();
-    geometry.computeBoundingBox(); geometry.computeBoundingSphere();
-    return geometry;
-  }
-  function clothHem(xs, zs, sample, radius = .0032) {
-    const points = [], xmin = xs[0], xmax = xs[xs.length - 1], zmin = zs[0], zmax = zs[zs.length - 1];
-    for (let i = 0; i < 64; i++) points.push(sample(xmin + (xmax - xmin) * i / 64, zmin));
-    for (let i = 0; i < 64; i++) points.push(sample(xmax, zmin + (zmax - zmin) * i / 64));
-    for (let i = 0; i < 64; i++) points.push(sample(xmax - (xmax - xmin) * i / 64, zmax));
-    for (let i = 0; i < 64; i++) points.push(sample(xmin, zmax - (zmax - zmin) * i / 64));
-    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points, true, 'centripetal'), 288, radius, 5, true);
-  }
-  function joinedCloth(geometry, hem, material, name) {
-    // Sewn border and cloth share one draw call. Neither needs per-frame work.
-    const combined = mergeGeometries([geometry, hem], false);
-    geometry.dispose(); hem.dispose();
-    const result = mesh(combined, material, 0, 0, 0); result.name = name;
-    return result;
-  }
-  function duvet(cx, cz) {
-    // Extra samples are concentrated on the rounded mattress shoulder and
-    // the foot. The large, gently inflated central surface stays inexpensive.
-    const xs = sampleAxis([[-1.25, -1.02, 12], [-1.02, -.84, 20], [-.84, .84, 88], [.84, 1.02, 20], [1.02, 1.25, 12]]);
-    const zs = sampleAxis([[-.82, .99, 100], [.99, 1.25, 32], [1.25, 1.47, 14]]);
-    const tension = [
-      [-.84, -.59, -.26, -.05, .081, .038, .8],
-      [.77, -.71, .16, -.08, .098, .044, 2.1],
-      [-.86, .26, -.23, .65, .073, .039, 1.2],
-      [.83, .36, .23, .82, .088, .047, 2.8],
-      [-.45, 1.12, -.21, .58, .065, .031, .3],
-      [.49, 1.14, .11, .78, .071, .035, 1.5],
-      [-.37, -.67, -.08, -.27, .054, .021, 2.4],
-    ].map(([ax, az, bx, bz, width, height, phase]) => {
-      const dx = bx - ax, dz = bz - az, length = Math.hypot(dx, dz);
-      return { ax, az, dx: dx / length, dz: dz / length, length, width, height, phase };
-    });
-    function surfaceFolds(x, z) {
-      let height = .005 * Math.sin(x * 4.1 + z * 2.7) + .003 * Math.sin(z * 6.8 - x * 3.2);
-      height += .014 * Math.exp(-(((x - .25) / .45) ** 2 + ((z - .31) / .62) ** 2));
-      height -= .008 * Math.exp(-(((x + .13) / .39) ** 2 + ((z + .37) / .30) ** 2));
-      for (const f of tension) {
-        const dx = x - f.ax, dz = z - f.az;
-        const along = (dx * f.dx + dz * f.dz) / f.length;
-        if (along < -.1 || along > 1.1) continue;
-        const taper = smooth01((along + .1) / .28) * smooth01((1.1 - along) / .36);
-        const bend = Math.sin(along * Math.PI * 1.4 + f.phase) * .023;
-        const across = -dx * f.dz + dz * f.dx - bend;
-        const width = f.width * (1.13 - smooth01(along) * .28);
-        height += (Math.exp(-((across / width) ** 2)) - .21 * Math.exp(-(((across + width * 1.5) / (width * 1.2)) ** 2))) * f.height * taper;
-      }
-      return height;
-    }
-    function sample(u, v) {
-      // The far corners are rounded in rest space. This removes the long,
-      // triangular points produced by dropping a rectangular grid vertically.
-      const corner = .20, start = 1.47 - corner;
-      const end = Math.max(0, v - start);
-      const rowHalfWidth = v > start ? 1.25 - corner + Math.sqrt(Math.max(0, corner * corner - end * end)) : 1.25;
-      let x = u / 1.25 * rowHalfWidth;
-      const scallop = smooth01((Math.abs(x) - .78) / .43);
-      x += Math.sign(x) * Math.sin(v * 8.1 + .7) * .012 * scallop;
-      const footWaver = Math.sin(u * 7.2 + .8) * .014 * smooth01((v - 1.04) / .4);
-      const z = v + footWaver;
-      const side = Math.max(0, Math.abs(x) - .84), foot = Math.max(0, z - 1.05);
-      const distance = Math.hypot(side, foot), radius = .11;
-      const nx = distance ? Math.sign(x) * side / distance : 0;
-      const nz = distance ? foot / distance : 0;
-      const arcLength = Math.PI * .5 * radius;
-      const theta = Math.min(Math.PI * .5, distance / radius);
-      const hanging = Math.max(0, distance - arcLength);
-      const curve = radius * Math.sin(theta);
-      const hangWeight = smooth01(hanging / .15);
-      const sidePleat = Math.sin(v * 14.8 + Math.sin(v * 4.2) + (x < 0 ? .5 : 2.1)) * .012 + Math.sin(v * 27 + .4) * .0035;
-      const footPleat = Math.sin(x * 17.2 + .5) * .012 + Math.sin(x * 29.6 + 2.2) * .004;
-      const billow = (sidePleat * Math.abs(nx) + footPleat * nz) * (.2 + hangWeight * .8);
-      const hemSway = Math.sin(v * 7 + x * 4.3) * .007 * hangWeight;
-      const topWeight = 1 - smooth01(distance / .24) * .82;
-      // A circular shoulder transitions to gravity-driven vertical cloth.
-      // Texture detail is reserved for the weave; folds exist in the mesh.
-      const y = .645 - radius * (1 - Math.cos(theta)) - hanging + surfaceFolds(x, z) * topWeight + hemSway;
-      const anchorX = THREE.MathUtils.clamp(x, -.84, .84), anchorZ = Math.min(z, 1.05);
-      let outward = curve + billow + hangWeight * .016;
-      // Below the mattress the cloth must clear the slightly wider timber
-      // rail, including its rounded foot corners. Preserve the folds above
-      // it; only ease the lower drape out onto this supporting silhouette.
-      const clearance = smooth01((.54 - y) / .135);
-      if (distance > 0 && clearance > 0) {
-        const railDistance = r => {
-          const qx = Math.abs(anchorX + nx * r) - .931;
-          const qz = Math.abs(anchorZ + nz * r) - 1.175;
-          return Math.hypot(Math.max(0, qx), Math.max(0, qz)) + Math.min(Math.max(qx, qz), 0) - .042;
-        };
-        if (railDistance(outward) < 0) {
-          let lo = outward, hi = .36;
-          for (let iteration = 0; iteration < 8; iteration++) {
-            const mid = (lo + hi) * .5;
-            if (railDistance(mid) < 0) lo = mid; else hi = mid;
-          }
-          outward += (hi - outward) * clearance;
-        }
-      }
-      const px = anchorX + nx * outward;
-      const pz = anchorZ + nz * outward;
-      return point(cx + px, y, cz + pz);
-    }
-    const material = cloneSurface(M.linen);
-    material.side = THREE.DoubleSide; material.color.multiplyScalar(.96);
-    material.normalScale?.set(.095, .095); material.roughness = 1;
-    joinedCloth(clothGrid(xs, zs, sample), clothHem(xs, zs, sample), material,
-      'Ivory duvet: rounded mattress shoulder, organic tension folds and sewn hem');
-
-    // The turned-back edge rests on the actual folded surface below it.
-    // Its gently rolled lip has no straight diagonal slab at either end.
-    const foldXs = sampleAxis([[-.94, -.78, 14], [-.78, .78, 72], [.78, .94, 14]]);
-    const foldZs = sampleAxis([[0, 1, 26]]);
-    const foldSample = (x, t) => {
-      const z = -.735 + t * .30 + x * .025;
-      const p = sample(x, z);
-      const rolledLip = Math.sin(t * Math.PI) * .026 + Math.exp(-(((t - .91) / .11) ** 2)) * .008;
-      p.y += .009 + rolledLip + Math.sin(x * 10.1 + t * 1.6) * .003;
-      return p;
-    };
-    const foldMaterial = cloneSurface(material); foldMaterial.color.multiplyScalar(1.02);
-    joinedCloth(clothGrid(foldXs, foldZs, foldSample, 2.1, (x, t) => [x, -.735 + t * .30 + x * .025]), clothHem(foldXs, foldZs, foldSample, .0022), foldMaterial,
-      'Soft turned-back duvet edge with a rolled sewn lip');
-    return { sample };
-  }
-  function wovenThrow(bedding) {
-    const material = cloneSurface(M.blanket); material.color.multiplyScalar(.89);
-    material.side = THREE.DoubleSide; material.roughness = .98;
-    material.normalScale?.set(.19, .19);
-    const xs = sampleAxis([[-1.22, -1.02, 12], [-1.02, -.84, 18], [-.84, .84, 80], [.84, 1.02, 18], [1.02, 1.22, 12]]);
-    const zs = sampleAxis([[.77, .99, 24], [.99, 1.26, 30], [1.26, 1.41, 14]]);
-    const sample = (x, z) => {
-      const p = bedding.sample(x, z);
-      const side = smooth01((Math.abs(x) - .8) / .34), foot = smooth01((z - 1.04) / .3);
-      const topWeight = 1 - Math.max(side, foot) * .88;
-      const softFold = Math.exp(-(((z - .91 + x * .043 + Math.sin(x * 3) * .012) / .042) ** 2)) * .023;
-      const crumple = Math.exp(-(((x - .41 + (z - .9) * .6) / .079) ** 2 + ((z - .98) / .35) ** 2)) * .022;
-      p.y += .016 + (softFold + crumple + Math.sin(x * 8 + z * 3) * .0035) * topWeight;
-      p.x += Math.sign(x) * side * .014;
-      p.z += foot * .014;
-      return p;
-    };
-    joinedCloth(clothGrid(xs, zs, sample, 1.8), clothHem(xs, zs, sample, .0026), material,
-      'Heavy woven throw following the duvet and rounded bed corners');
-    // Forty-one short yarn tassels are one mesh, rather than forty-one draws.
-    const fringeGeometry = [];
-    for (let i = 0; i < 41; i++) {
-      const x = -1.205 + i * 2.41 / 40;
-      const start = sample(x, 1.41), end = sample(x, 1.452);
-      end.y -= .004 + (1 + Math.sin(i * 2.1)) * .003;
-      end.x += Math.sin(i * 2.7) * .002;
-      const middle = start.clone().lerp(end, .55); middle.z += .002;
-      fringeGeometry.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([start, middle, end]), 4, .0016, 4, false));
-    }
-    const fringe = mesh(mergeGeometries(fringeGeometry, false), material, 0, 0, 0);
-    fringe.name = 'Fine irregular woven fringe, single static mesh';
-    fringeGeometry.forEach(geometry => geometry.dispose());
   }
   function book(width, height, depth, color) {
     const group = new THREE.Group(); room.add(group);
