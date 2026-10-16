@@ -11,6 +11,12 @@ body { overscroll-behavior: none; }
 button { font: inherit; -webkit-tap-highlight-color: transparent; }
 #scene { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
 #scene:active { cursor: grabbing; }
+.lens-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 47%, transparent 35%, #0000000a 70%, #00000038 100%);
+}
 .environment-label {
   position: fixed;
   top: max(28px, env(safe-area-inset-top));
@@ -74,6 +80,9 @@ button { font: inherit; -webkit-tap-highlight-color: transparent; }
   transition: opacity .2s;
 }
 .exploring #crosshair { opacity: 1; }
+.environment-label, .controls-hint, .view-actions { transition: opacity .35s; }
+.exploring .environment-label, .exploring .controls-hint { opacity: 0; }
+.exploring .view-actions { opacity: .12; }
 #loading, #errorPanel {
   position: fixed;
   inset: 0;
@@ -106,3 +115,6 @@ button { font: inherit; -webkit-tap-highlight-color: transparent; }
   .move-right { grid-column: 3; grid-row: 2; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; } }
+
+.quality-status{display:block;margin-top:9px;font-size:8px;letter-spacing:1.7px;color:#d5c8af70}.view-actions .text-action{width:auto;min-width:72px;padding:8px 11px;font-size:8px;letter-spacing:1.2px;border-color:#ddd3bd18;background:#15161540;backdrop-filter:blur(9px)}.view-actions .text-action[aria-pressed=true]{border-color:#d4bd8045;color:#e6d3ac}.view-actions button:disabled{opacity:.5;cursor:default}.view-actions{gap:7px}.environment-label{opacity:.85}.controls-hint{font-size:9px}.view-actions .text-action:hover{background:#211f1899}@media(max-width:760px){.quality-status{font-size:7px;letter-spacing:1px}.view-actions{right:15px;bottom:17px;gap:3px}.view-actions .text-action{font-size:7px;min-width:63px;padding:7px}.view-actions button{width:30px;height:34px}.desktop-hint{max-width:50vw;line-height:1.8;display:block}.controls-hint{max-width:50vw}}@media(pointer:coarse){.desktop-hint{display:none}.controls-hint{bottom:64px;right:18px;left:auto}.touch-movement{grid-template-columns:repeat(3,42px);grid-template-rows:repeat(2,42px)}}
+body:not([data-quality="quality"]) .view-actions .text-action { backdrop-filter: none; background: #1516158c; }

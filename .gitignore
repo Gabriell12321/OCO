@@ -3,3 +3,15 @@ node_modules/
 .sites-runtime/
 *.tar.gz
 qa-*.jpg
+.private/
+.env
+.env.*
+*.secret.md
+Windows/
+Quarto 01 Windows.zip
+Quarto 01 Windows.sha256.txt
+dist/avatar.js
+dist/cinematic.js
+dist/assets/character/
+dist/vendor/pathtracer/
+CHARACTER.md

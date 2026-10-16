@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#11110f" />
-    <title>Quarto 01 — Estudo de ambiente</title>
+    <title>Quarto 01</title>
     <link rel="stylesheet" href="./style.css" />
     <script type="importmap">
       { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
@@ -12,17 +12,20 @@
   </head>
   <body>
     <main aria-label="Quarto em 3D">
-      <canvas id="scene" aria-label="Ambiente de um quarto realista em primeira pessoa. Arraste para olhar e use WASD ou as setas para caminhar." tabindex="0"></canvas>
+      <canvas id="scene" aria-label="Quarto em primeira pessoa. Clique ou arraste para olhar e use WASD para andar." tabindex="0"></canvas>
+      <div class="lens-vignette" aria-hidden="true"></div>
       <header class="environment-label" aria-label="Estudo de ambiente">
         <span class="environment-name">QUARTO 01</span>
-        <span class="environment-subtitle">Estudo de ambiente</span>
+        <span class="environment-subtitle">Primeira pessoa</span>
+        <span id="qualityStatus" class="quality-status">EXPLORAÇÃO DO AMBIENTE</span>
       </header>
       <div id="crosshair" aria-hidden="true"></div>
       <div class="controls-hint" aria-hidden="true">
-        <span class="desktop-hint">Arraste para olhar <span class="separator">·</span> WASD para caminhar</span>
+        <span class="desktop-hint">Clique ou arraste para olhar <span class="separator">·</span> WASD andar <span class="separator">·</span> SHIFT correr <span class="separator">·</span> ESC soltar</span>
         <span class="touch-hint">Arraste para olhar</span>
       </div>
       <nav class="view-actions" aria-label="Controles de visualização">
+        <button id="qualityBtn" class="text-action" type="button" aria-label="Alternar desempenho, equilibrado e qualidade">DESEMPENHO</button>
         <button id="resetBtn" type="button" aria-label="Restaurar ponto de vista" title="Restaurar ponto de vista">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true"><path d="M4 11a8 8 0 1 1 1.9 6.2M4 5v6h6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>

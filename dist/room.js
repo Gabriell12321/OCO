@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // A quiet, occupied bedroom. All measurements are in metres.
 export function createRoom(scene, materials) {
@@ -17,7 +18,12 @@ export function createRoom(scene, materials) {
     metal: mat('metal', '#383c38', .35), brass: mat('brass', '#8d7450', .4),
     paper: mat('paper', '#b9ac90'), glass: mat('glass', '#b2c9c1', .1)
   };
-  const plain = (color, roughness = .8, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness, ...extra });
+  const plainMaterials = new Map();
+  const plain = (color, roughness = .8, extra = {}) => {
+    const key = JSON.stringify([color, roughness, extra]);
+    if (!plainMaterials.has(key)) plainMaterials.set(key, new THREE.MeshStandardMaterial({ color, roughness, ...extra }));
+    return plainMaterials.get(key);
+  };
   const cloneSurface = material => {
     const copy=material.clone();
     copy.onBeforeCompile=material.onBeforeCompile;
@@ -25,11 +31,39 @@ export function createRoom(scene, materials) {
     return copy;
   };
   const shadowMaterial = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, opacity: .22, map: contactTexture(), color: '#000000' });
-  const softWood = M.wood.clone(); softWood.color.multiplyScalar(1.08);
+  const softWood = M.wood.clone(); softWood.color.multiplyScalar(1.04);
   const darkEdge = M.dark.clone(); darkEdge.color.multiplyScalar(.73);
   const enamel = plain('#a29e8c', .45);
   const cottonStitch = plain('#a9a28d');
   const insideBlack = plain('#141613');
+
+  // The same paint and timber texture keeps its real-world scale on every
+  // length of wall and on every furniture part, including thin mouldings.
+  function surfaceUV(geometry, material, x, y, z) {
+    const architectural = material === M.wall || material === M.ceiling || material === M.trim || (material.map && material.map === M.trim.map);
+    const timber = material.map && material.map === M.wood.map;
+    if (!architectural && !timber) return;
+    const p = geometry.attributes.position, n = geometry.attributes.normal, uv = geometry.attributes.uv;
+    geometry.computeBoundingBox(); const size = new THREE.Vector3(); geometry.boundingBox.getSize(size);
+    for (let i = 0; i < p.count; i++) {
+      const nx = Math.abs(n.getX(i)), ny = Math.abs(n.getY(i)), nz = Math.abs(n.getZ(i));
+      let u, v;
+      if (nx > ny && nx > nz) {
+        u = p.getZ(i); v = p.getY(i);
+        if (timber && size.y > size.z) [u, v] = [v, u];
+        if (architectural) { u += z; v += y; }
+      } else if (ny > nz) {
+        u = p.getX(i); v = p.getZ(i);
+        if (timber && size.z > size.x) [u, v] = [v, u];
+        if (architectural) { u += x; v += z; }
+      } else {
+        u = p.getX(i); v = p.getY(i);
+        if (timber && size.y > size.x) [u, v] = [v, u];
+        if (architectural) { u += x; v += y; }
+      }
+      uv.setXY(i, u / (architectural ? 2 : 1.15), v / (architectural ? 2 : .62));
+    }
+  }
 
   function mesh(geometry, material, x, y, z, parent = room) {
     const item = new THREE.Mesh(geometry, material);
@@ -39,6 +73,7 @@ export function createRoom(scene, materials) {
   }
   function box(w, h, d, x, y, z, material, radius = 0, parent = room) {
     const geometry = radius > 0 ? new RoundedBoxGeometry(w, h, d, 2, Math.min(radius, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d);
+    surfaceUV(geometry, material, x, y, z);
     return mesh(geometry, material, x, y, z, parent);
   }
   function cylinder(top, bottom, height, x, y, z, material, segments = 24, parent = room) {
@@ -55,7 +90,9 @@ export function createRoom(scene, materials) {
   function contact(x, z, w, d, opacity = .22, y = .012) {
     const material = shadowMaterial.clone(); material.opacity = opacity;
     const result = mesh(new THREE.PlaneGeometry(w, d), material, x, y, z);
-    result.rotation.x = -Math.PI / 2; result.castShadow = false; return result;
+    result.rotation.x = -Math.PI / 2; result.castShadow = false;
+    result.userData.excludeFromPathTrace = true;
+    return result;
   }
   function block(x, z, w, d, margin = .08) {
     colliders.push({ minX: x - w / 2 - margin, maxX: x + w / 2 + margin, minZ: z - d / 2 - margin, maxZ: z + d / 2 + margin });
@@ -82,12 +119,12 @@ export function createRoom(scene, materials) {
   box(6, .11, .035, 0, .055, 3.18, M.trim, .008);
   for (const side of [-1, 1]) {
     box(.035, .11, 6.4, side * 2.98, .055, 0, M.trim, .008);
-    box(.032, .52, 6.4, side * 2.982, .38, paneled);
-    box(.052, .035, 6.4, side * 2.967, .675, M.trim, .006);
-    box(.035, .026, 6.4, side * 2.977, .635, M.trim, .004);
-    box(.076, .085, 6.4, side * 2.956, 2.925, M.trim, .012);
-    box(.105, .025, 6.4, side * 2.94, 2.977, M.trim, .006);
-    box(.038, .024, 6.4, side * 2.974, 2.865, M.trim, .005);
+    box(.032, .52, 6.4, side * 2.982, .38, 0, paneled);
+    box(.052, .035, 6.4, side * 2.967, .675, 0, M.trim, .006);
+    box(.035, .026, 6.4, side * 2.977, .635, 0, M.trim, .004);
+    box(.076, .085, 6.4, side * 2.956, 2.925, 0, M.trim, .012);
+    box(.105, .025, 6.4, side * 2.94, 2.977, 0, M.trim, .006);
+    box(.038, .024, 6.4, side * 2.974, 2.865, 0, M.trim, .005);
     for (let z = -2.75; z < 3.1; z += .74) box(.039, .45, .024, side * 2.96, .38, z, M.trim, .004);
   }
   for (const z of [-3.18, 3.18]) {
@@ -99,9 +136,29 @@ export function createRoom(scene, materials) {
     box(6, .024, .038, 0, 2.865, z, M.trim, .005);
     for (let x = -2.65; x < 3; x += .74) box(.024, .45, .039, x, .38, z + (z > 0 ? -.024 : .024), M.trim, .004);
   }
+  // Small irregular losses in the old paint reveal timber at the skirting.
+  // These are solid surface details, so they remain visible in the GI renderer.
+  const paintLoss = plain('#776b51', .98, { side: THREE.DoubleSide });
+  let paintSeed = 98412;
+  const paintRandom = () => { paintSeed = (paintSeed * 1664525 + 1013904223) >>> 0; return paintSeed / 4294967296; };
+  for (let i = 0; i < 38; i++) {
+    const width = .003 + paintRandom() * .013, height = .0015 + paintRandom() * .005;
+    const shape = new THREE.Shape();
+    shape.moveTo(-width / 2, -height * .3);
+    shape.lineTo(-width * .35, height * .4);
+    shape.lineTo(width * .13, height * .3);
+    shape.lineTo(width * .4, height * .65);
+    shape.lineTo(width / 2, -height * .2);
+    shape.lineTo(0, -height * .5); shape.closePath();
+    const along = -2.75 + paintRandom() * 5.5, y = .012 + paintRandom() * .085;
+    const side = i % 4;
+    const chip = mesh(new THREE.ShapeGeometry(shape), paintLoss, side < 2 ? along : (side === 2 ? -2.959 : 2.959), y, side < 2 ? (side === 0 ? -3.159 : 3.159) : along);
+    chip.rotation.y = [0, Math.PI, Math.PI / 2, -Math.PI / 2][side];
+    chip.castShadow = false; chip.name = 'Fine chipped paint on skirting';
+  }
 
   // Window, deep reveals, old sash frame and a few realistic bevelled edges.
-  const windowPaint = plain('#b9b5a4', .64);
+  const windowPaint = cloneSurface(M.trim); windowPaint.color.set('#b9b5a4'); windowPaint.roughness = .64;
   const frameShade = plain('#858879', .7);
   box(1.85, .055, .27, .4, .985, -3.145, windowPaint, .012);
   box(1.8, .055, .115, .4, .922, -3.15, windowPaint, .008);
@@ -118,16 +175,8 @@ export function createRoom(scene, materials) {
   const glass = mesh(new THREE.PlaneGeometry(1.54, 1.45), glassMaterial, .4, 1.775, -3.23); glass.castShadow = false;
   box(.064, .022, .028, .4, 1.801, -3.128, M.brass, .006);
   cylinder(.009, .009, .025, .4, 1.814, -3.11, M.brass, 12).rotation.x = Math.PI / 2;
-  // Exterior silhouettes give the window actual visual depth without extra rooms.
-  const nightMat = new THREE.MeshBasicMaterial({ color: '#09121b', side: THREE.DoubleSide });
-  mesh(new THREE.PlaneGeometry(11, 9), nightMat, .4, 1.4, -7.3).castShadow = false;
-  const distantMat = new THREE.MeshBasicMaterial({ color: '#050b0f' });
-  for (let i = 0; i < 9; i++) {
-    const x = -4.3 + i * 1.1;
-    rod(point(x, -1, -5.7), point(x + Math.sin(i) * .35, 3.5 + Math.sin(i * 2.1), -5.7), .035 + (i % 3) * .008, distantMat);
-    rod(point(x, 1.6, -5.7), point(x + .6, 2.5, -5.7), .018, distantMat);
-    rod(point(x, 1.2, -5.7), point(x - .55, 2.2, -5.7), .021, distantMat);
-  }
+  // The exterior is the renderer's photographic night environment, seen only
+  // through this physical opening rather than through an opaque backdrop.
 
   // Pleated curtains hang with varying depth and softly sagged hems.
   const curtainMaterial = cloneSurface(M.curtain); curtainMaterial.side = THREE.DoubleSide;
@@ -163,7 +212,7 @@ export function createRoom(scene, materials) {
   }
 
   // Bed: a real layered silhouette, exposed frame and deliberately imperfect linens.
-  const bedX = -.97, bedZ = -1.02;
+  const bedX = -.97, bedZ = -1.58, bedHead = bedZ - 1.243;
   block(bedX, bedZ, 1.96, 2.43, .07);
   contact(bedX, bedZ, 2.5, 2.95, .3);
   for (const x of [bedX - .79, bedX + .79]) for (const z of [bedZ - .93, bedZ + .93]) {
@@ -177,37 +226,24 @@ export function createRoom(scene, materials) {
   roundedOutline(1.866, 2.316, .07, bedX, .565, bedZ, .004, cottonStitch);
   roundedOutline(1.868, 2.316, .07, bedX, .452, bedZ, .004, cottonStitch);
   // Low walnut headboard with leather-like padded insert and frame moulding.
-  box(2.02, .93, .11, bedX, .625, -2.263, M.wood, .035);
-  box(1.81, .53, .045, bedX, .735, -2.194, M.dark, .035);
-  box(1.76, .48, .03, bedX, .735, -2.163, plain('#4b4234', .98), .04);
-  box(2.08, .075, .14, bedX, 1.11, -2.264, softWood, .014);
-  for (const x of [bedX - .97, bedX + .97]) box(.07, .97, .13, x, .625, -2.25, softWood, .012);
+  box(2.02, .93, .11, bedX, .625, bedHead, M.wood, .035);
+  box(1.81, .53, .045, bedX, .735, bedHead + .069, M.dark, .035);
+  const paddedLeather = new THREE.MeshPhysicalMaterial({ color: '#474035', roughness: .88, normalMap: M.linen.normalMap, normalScale: new THREE.Vector2(.045, .045), sheen: .22, sheenColor: '#b5a28b', sheenRoughness: .82 });
+  box(1.76, .48, .03, bedX, .735, bedHead + .1, paddedLeather, .04);
+  box(2.08, .075, .14, bedX, 1.11, bedHead - .001, softWood, .014);
+  for (const x of [bedX - .97, bedX + .97]) box(.07, .97, .13, x, .625, bedHead + .013, softWood, .012);
   for (const x of [bedX - .59, bedX, bedX + .59]) {
-    const button = mesh(new THREE.SphereGeometry(.016, 12, 8), M.dark, x, .78, -2.139); button.scale.z = .3;
+    const button = mesh(new THREE.SphereGeometry(.016, 12, 8), M.dark, x, .78, bedHead + .124); button.scale.z = .3;
   }
   // Irregular pillows are sewn closed, slightly sunken and asymmetrically placed.
-  pillow(bedX - .46, .687, -1.84, -.055);
-  pillow(bedX + .41, .69, -1.88, .09);
+  pillow(bedX - .46, .687, bedZ - .82, -.055);
+  pillow(bedX + .41, .69, bedZ - .86, .09);
   // Top surface and dropped sides are connected so the blanket never reads as a cuboid.
-  duvet(bedX, bedZ, 1.91, 2.05);
-  // A folded woven throw across the foot adds a second fabric scale.
-  const throwMaterial = M.blanket.clone(); throwMaterial.color.multiplyScalar(.67);
-  const throwGeo = new THREE.PlaneGeometry(2.06, .61, 70, 24);
-  for (let i = 0; i < throwGeo.attributes.position.count; i++) {
-    const p = throwGeo.attributes.position, x = p.getX(i), along = p.getY(i);
-    const edge = Math.max(0, (Math.abs(x) - .85) / .18);
-    const footDrape = Math.max(0, (along - .12) / .185) * .16;
-    p.setXYZ(i, bedX + x, .666 + Math.sin(x * 26 + along * 8) * .009 + Math.sin(along * 34) * .007 - edge * .25 - footDrape, -.015 + along);
-  }
-  throwGeo.computeVertexNormals(); throwMaterial.side = THREE.DoubleSide;
-  mesh(throwGeo, throwMaterial, 0, 0, 0);
-  for (let i = 0; i < 41; i++) {
-    const x = -1.99 + i * .051;
-    rod(point(x, .496 - Math.max(0, (Math.abs(x - bedX) - .85) / .18) * .25, .29), point(x + .004 * Math.sin(i), .48 - Math.max(0, (Math.abs(x - bedX) - .85) / .18) * .25, .323 + Math.sin(i) * .005), .0018, throwMaterial);
-  }
+  const bedding = duvet(bedX, bedZ);
+  wovenThrow(bedding);
 
   // Bedside cabinet, three inset drawers, handles, a lamp, a book and drinking glass.
-  const bedsideX = .4, bedsideZ = -2.02;
+  const bedsideX = .4, bedsideZ = -2.58;
   block(bedsideX, bedsideZ, .62, .57);
   contact(bedsideX, bedsideZ, .88, .8, .25);
   box(.58, .57, .52, bedsideX, .355, bedsideZ, M.wood, .016);
@@ -220,29 +256,50 @@ export function createRoom(scene, materials) {
     box(.45, .098, .013, bedsideX, y, bedsideZ + .295, softWood, .005);
     cylinder(.018, .018, .03, bedsideX, y, bedsideZ + .317, M.brass, 16).rotation.x = Math.PI / 2;
   }
-  cylinder(.095, .105, .018, .4, .701, -2.035, M.brass, 40);
-  cylinder(.052, .065, .04, .4, .729, -2.035, darkEdge, 32);
-  cylinder(.015, .025, .22, .4, .85, -2.035, M.brass, 20);
-  cylinder(.035, .035, .04, .4, .977, -2.035, M.brass, 20);
-  const shade = plain('#c2b28f', .9, { side: THREE.DoubleSide, emissive: '#d78637', emissiveIntensity: .19 });
-  const shadeGeo = new THREE.CylinderGeometry(.15, .225, .29, 64, 1, true);
-  const lampShade = mesh(shadeGeo, shade, .4, 1.125, -2.035); lampShade.castShadow = false;
-  for (const [radius, y] of [[.151, 1.27], [.226, .98]]) {
-    const ring = mesh(new THREE.TorusGeometry(radius, .005, 6, 64), plain('#9e8968'), .4, y, -2.035); ring.rotation.x = Math.PI / 2;
+  const lampZ = bedsideZ - .015;
+  cylinder(.095, .105, .018, bedsideX, .701, lampZ, M.brass, 48);
+  cylinder(.052, .065, .04, bedsideX, .729, lampZ, darkEdge, 40);
+  const lampStem = cylinder(.015, .025, .22, bedsideX, .85, lampZ, M.brass, 24);
+  const bulbSocket = cylinder(.035, .035, .04, bedsideX, .977, lampZ, M.brass, 24);
+  lampStem.castShadow = bulbSocket.castShadow = false;
+  const shade = new THREE.MeshPhysicalMaterial({
+    color: '#d9ccb0', map: M.linen.map, normalMap: M.linen.normalMap,
+    normalScale: new THREE.Vector2(.065, .065), roughness: .93,
+    transmission: .58, thickness: .0025, ior: 1.3,
+    attenuationColor: '#f5deb0', attenuationDistance: .12,
+    side: THREE.DoubleSide, sheen: .35, sheenRoughness: .95,
+    emissive: '#d19b61', emissiveIntensity: .055,
+  });
+  const shadeGeo = new THREE.CylinderGeometry(.15, .225, .29, 144, 12, true);
+  const shadeP = shadeGeo.attributes.position;
+  for (let i = 0; i < shadeP.count; i++) {
+    const x = shadeP.getX(i), z = shadeP.getZ(i), angle = Math.atan2(z, x);
+    const pleat = 1 + Math.cos(angle * 48) * .012;
+    shadeP.setXYZ(i, x * pleat, shadeP.getY(i), z * pleat);
   }
-  const filament = mesh(new THREE.SphereGeometry(.035, 16, 12), plain('#ffdc9b', .3, { emissive: '#ffbd63', emissiveIntensity: 2 }), .4, 1.07, -2.035);
+  shadeGeo.computeVertexNormals();
+  const lampShade = mesh(shadeGeo, shade, bedsideX, 1.125, lampZ); lampShade.castShadow = false;
+  lampShade.name = 'Fine pleated translucent linen lampshade';
+  for (const [radius, y] of [[.151, 1.27], [.226, .98]]) {
+    const ring = mesh(new THREE.TorusGeometry(radius, .004, 8, 80), plain('#9e8968'), bedsideX, y, lampZ);
+    ring.rotation.x = Math.PI / 2;
+    // A point emitter cannot represent the diffuse light of a real shade.
+    // Its fine wire rims otherwise project implausible black rings overhead.
+    ring.castShadow = false;
+  }
+  const filament = mesh(new THREE.SphereGeometry(.026, 24, 16), plain('#ffdc9b', .3, { emissive: '#ffbd63', emissiveIntensity: 2 }), bedsideX, 1.07, lampZ);
   filament.castShadow = false;
-  rod(point(.4, .71, -2.12), point(.43, .69, -2.28), .003, insideBlack);
-  rod(point(.43, .69, -2.28), point(.47, .02, -2.29), .003, insideBlack);
+  rod(point(bedsideX, .71, bedsideZ - .1), point(bedsideX + .03, .69, bedsideZ - .26), .003, insideBlack);
+  rod(point(bedsideX + .03, .69, bedsideZ - .26), point(bedsideX + .07, .02, bedsideZ - .27), .003, insideBlack);
   const bookGroup = book(.17, .025, .24, '#343d33');
-  bookGroup.position.set(.54, .707, -1.89); bookGroup.rotation.y = -.15;
+  bookGroup.position.set(bedsideX + .14, .707, bedsideZ + .13); bookGroup.rotation.y = -.15;
   const glassMat = new THREE.MeshPhysicalMaterial({ color: '#c8ddd4', transparent: true, opacity: .22, roughness: .08, metalness: .02, side: THREE.DoubleSide, depthWrite: false });
-  const tumbler = mesh(new THREE.CylinderGeometry(.038, .032, .105, 32, 1, true), glassMat, .18, .741, -1.88);
-  const rim = mesh(new THREE.TorusGeometry(.038, .0018, 6, 32), glassMat, .18, .793, -1.88); rim.rotation.x = Math.PI / 2;
-  const water = mesh(new THREE.CircleGeometry(.034, 32), new THREE.MeshPhysicalMaterial({ color: '#b4c9bd', transparent: true, opacity: .32, roughness: .03 }), .18, .742, -1.88); water.rotation.x = -Math.PI / 2;
+  const tumbler = mesh(new THREE.CylinderGeometry(.038, .032, .105, 32, 1, true), glassMat, bedsideX - .22, .741, bedsideZ + .14);
+  const rim = mesh(new THREE.TorusGeometry(.038, .0018, 6, 32), glassMat, bedsideX - .22, .793, bedsideZ + .14); rim.rotation.x = Math.PI / 2;
+  const water = mesh(new THREE.CircleGeometry(.034, 32), new THREE.MeshPhysicalMaterial({ color: '#b4c9bd', transparent: true, opacity: .32, roughness: .03 }), bedsideX - .22, .742, bedsideZ + .14); water.rotation.x = -Math.PI / 2;
 
   // A restrained, worn Persian-inspired rug, with border and a little unevenness.
-  const rugTexture = patternedRug();
+  const rugTexture = patternedRug(M.rug.map?.image);
   const rugMaterial = new THREE.MeshStandardMaterial({ map: rugTexture, roughness: 1, normalMap: M.rug.normalMap, normalScale: new THREE.Vector2(.3,.3), roughnessMap: M.rug.roughnessMap, bumpMap: rugTexture, bumpScale: .001 });
   const rugGeo = new THREE.PlaneGeometry(2.45, 2.03, 45, 40);
   const rugP = rugGeo.attributes.position;
@@ -292,8 +349,11 @@ export function createRoom(scene, materials) {
   box(.65, .12, .035, 0, .687, .36, softWood, .008, desk);
   for (const x of [-.08, .08]) rod(point(x, .687, .38), point(x, .687, .408), .007, M.brass, desk);
   rod(point(-.08, .687, .408), point(.08, .687, .408), .007, M.brass, desk);
-  const deskPad = box(.61, .008, .41, .02, .809, .015, plain('#28372f'), .02, desk);
-  const loosePaper = box(.185, .0015, .26, -.04, .815, .015, M.paper, 0, desk); loosePaper.rotation.y = .09;
+  const deskLeather = cloneSurface(M.blanket);
+  deskLeather.name = 'Worn olive leather writing pad'; deskLeather.color.set('#41443a');
+  deskLeather.normalScale.set(.055, .055); deskLeather.roughness = .86;
+  const deskPad = box(.61, .008, .41, .02, .809, .015, deskLeather, .02, desk);
+  const loosePaper = box(.185, .0015, .26, -.04, .815, .015, stationery(), 0, desk); loosePaper.rotation.y = .09;
   const pen = rod(point(.04, .819, -.05), point(.13, .819, .07), .003, M.dark, desk);
   for (let i = 0; i < 3; i++) {
     const item = book(.2 + i * .012, .031 + i * .005, .28, ['#454a40', '#5d3b2d', '#736349'][i]);
@@ -307,7 +367,10 @@ export function createRoom(scene, materials) {
   const chair = new THREE.Group(); chair.position.set(1.42, 0, -.62); chair.rotation.y = -Math.PI / 2 + .09; room.add(chair);
   block(1.42, -.62, .52, .56, .04); contact(1.42, -.62, .77, .8, .2);
   box(.46, .055, .44, 0, .455, 0, M.wood, .022, chair);
-  box(.418, .048, .397, 0, .494, 0, plain('#696149', 1), .035, chair);
+  const chairFabric = cloneSurface(M.blanket);
+  chairFabric.name = 'Faded olive woven seat cushion'; chairFabric.color.set('#8e8b74');
+  chairFabric.normalScale.set(.20, .20); chairFabric.roughness = 1;
+  box(.418, .048, .397, 0, .494, 0, chairFabric, .035, chair);
   for (const x of [-.18, .18]) for (const z of [-.16, .16]) {
     const leg = box(.036, .43, .036, x, .233, z, M.wood, .007, chair); leg.rotation.z = x * -.18;
   }
@@ -340,13 +403,19 @@ export function createRoom(scene, materials) {
   // Single period-correct light switch by the door.
   box(.081, .124, .009, 1.23, 1.22, 3.18, windowPaint, .007);
   box(.031, .057, .011, 1.23, 1.224, 3.17, windowPaint, .004);
+  for (const y of [1.173, 1.267]) {
+    const screw = cylinder(.0025, .0025, .0015, 1.23, y, 3.174, M.brass, 8);
+    screw.rotation.x = Math.PI / 2; screw.castShadow = false;
+    const slot = rod(point(1.2285, y, 3.1729), point(1.2315, y, 3.1729), .00022, M.dark);
+    slot.castShadow = false;
+  }
   box(.11, .075, .012, 2.02, .24, -3.182, windowPaint, .006);
   for (const x of [1.994, 2.047]) for (const dx of [-.006, .006]) box(.0028, .014, .002, x + dx, .242, -3.173, M.dark, .001);
 
   // Faded photographs in layered timber frames. No supernatural props or UI.
   picture(-2.974, 1.72, -1.58, .55, .73, Math.PI / 2, 1);
   picture(2.974, 1.85, 1.47, .62, .46, -Math.PI / 2, 2);
-  return { colliders, lampPosition: new THREE.Vector3(.4, 1.075, -2.035), windowPosition: new THREE.Vector3(.4, 1.775, -3.18), updates: [] };
+  return { colliders, lampPosition: new THREE.Vector3(bedsideX, 1.075, lampZ), windowPosition: new THREE.Vector3(.4, 1.775, -3.18), updates: [] };
 
   function roundedOutline(width, depth, radius, cx, y, cz, thickness, material) {
     const shape = new THREE.Shape();
@@ -365,7 +434,7 @@ export function createRoom(scene, materials) {
   }
   function pillow(x, y, z, angle) {
     const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = angle; room.add(g);
-    const geometry = new THREE.SphereGeometry(1, 40, 24);
+    const geometry = new THREE.SphereGeometry(1, 64, 40);
     const p = geometry.attributes.position;
     for (let i = 0; i < p.count; i++) {
       const nx = p.getX(i), ny = p.getY(i), nz = p.getZ(i);
@@ -373,8 +442,10 @@ export function createRoom(scene, materials) {
       const px = Math.sign(nx) * Math.pow(Math.abs(nx), .46) * .38;
       const pz = Math.sign(nz) * Math.pow(Math.abs(nz), .49) * .235;
       const depression = Math.exp(-((px + .025) ** 2 / .018 + (pz - .025) ** 2 / .009)) * .026 * Math.max(0, ny);
-      const wrinkles = Math.sin(px * 58 + pz * 16) * .0028 * (1 - Math.abs(ny));
-      p.setXYZ(i, px, ny * .085 - depression + wrinkles, pz);
+      const seamGather = Math.exp(-((Math.abs(px) - .315) ** 2) / .0012);
+      const wrinkles = (Math.sin(pz * 79 + px * 7) + Math.sin(pz * 43 - px * 13) * .5) * .0023 * seamGather;
+      const subtleCrumple = Math.sin(px * 14 + pz * 23) * .002 * Math.max(0, ny);
+      p.setXYZ(i, px, ny * .085 - depression + wrinkles + subtleCrumple, pz);
     }
     geometry.computeVertexNormals(); mesh(geometry, M.linen, 0, 0, 0, g);
     const seamPoints = [];
@@ -386,33 +457,194 @@ export function createRoom(scene, materials) {
     mesh(new THREE.TubeGeometry(curve, 90, .0023, 4, true), cottonStitch, 0, 0, 0, g);
     g.rotation.x = -.09;
   }
-  function duvet(cx, cz, width, length) {
-    const geometry = new THREE.PlaneGeometry(width + .24, length, 100, 115);
-    const p = geometry.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), v = p.getY(i), normalizedZ = (v + length / 2) / length;
-      const z = cz + .22 + v;
-      const edge = Math.max(0, (Math.abs(x) - .84) / .235);
-      const foot = Math.max(0, (v - length * .42) / (length * .08));
-      const diagonal = Math.sin(x * 16 + v * 5) * .012 + Math.sin(x * 29 - v * 11) * .005;
-      const crossWrinkle = Math.sin(v * 22 + Math.sin(x * 9)) * .01;
-      const gathered = Math.exp(-((x - .55) ** 2 / .09 + (v + .62) ** 2 / .12)) * .038;
-      const fold = Math.exp(-((v + .6 + x * .07) ** 2 / .005)) * .029;
-      const y = .638 + diagonal + crossWrinkle + gathered + fold - edge ** 1.24 * .272 - foot * .215;
-      p.setXYZ(i, cx + x, y, z);
+  function smooth01(value) {
+    const t = THREE.MathUtils.clamp(value, 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+  function sampleAxis(parts) {
+    const result = [];
+    for (const [start, end, segments] of parts) {
+      for (let i = 0; i < segments; i++) result.push(start + (end - start) * i / segments);
     }
-    geometry.computeVertexNormals();
-    const material = cloneSurface(M.linen); material.side = THREE.DoubleSide; material.color.multiplyScalar(.93);
-    mesh(geometry, material, 0, 0, 0);
-    // Turned-back sheet at the head, physically folded rather than painted on.
-    const foldGeo = new THREE.PlaneGeometry(1.88, .31, 72, 16);
-    const f = foldGeo.attributes.position;
-    for (let i = 0; i < f.count; i++) {
-      const x = f.getX(i), v = f.getY(i);
-      f.setXYZ(i, cx + x, .673 + Math.sin((v + .155) / .31 * Math.PI) * .022 + Math.sin(x * 24 + v * 7) * .006, -1.601 + v + x * .035);
+    result.push(parts[parts.length - 1][1]);
+    return result;
+  }
+  function clothGrid(xs, zs, sample, uvSize = 2.1, restUV = (x, z) => [x, z]) {
+    const positions = [], uvs = [], indices = [];
+    for (const z of zs) for (const x of xs) {
+      const p = sample(x, z);
+      positions.push(p.x, p.y, p.z);
+      // Rest-space UVs keep the linen weave the same size over curved edges.
+      const [restX, restZ] = restUV(x, z);
+      uvs.push((restX + 1.25) / uvSize, (restZ + .82) / uvSize);
     }
-    foldGeo.computeVertexNormals(); const foldMat = cloneSurface(M.linen); foldMat.side = THREE.DoubleSide;
-    mesh(foldGeo, foldMat, 0, 0, 0);
+    const stride = xs.length;
+    for (let j = 0; j < zs.length - 1; j++) for (let i = 0; i < stride - 1; i++) {
+      const a = j * stride + i, b = a + 1, c = a + stride, d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices); geometry.computeVertexNormals();
+    geometry.computeBoundingBox(); geometry.computeBoundingSphere();
+    return geometry;
+  }
+  function clothHem(xs, zs, sample, radius = .0032) {
+    const points = [], xmin = xs[0], xmax = xs[xs.length - 1], zmin = zs[0], zmax = zs[zs.length - 1];
+    for (let i = 0; i < 64; i++) points.push(sample(xmin + (xmax - xmin) * i / 64, zmin));
+    for (let i = 0; i < 64; i++) points.push(sample(xmax, zmin + (zmax - zmin) * i / 64));
+    for (let i = 0; i < 64; i++) points.push(sample(xmax - (xmax - xmin) * i / 64, zmax));
+    for (let i = 0; i < 64; i++) points.push(sample(xmin, zmax - (zmax - zmin) * i / 64));
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points, true, 'centripetal'), 288, radius, 5, true);
+  }
+  function joinedCloth(geometry, hem, material, name) {
+    // Sewn border and cloth share one draw call. Neither needs per-frame work.
+    const combined = mergeGeometries([geometry, hem], false);
+    geometry.dispose(); hem.dispose();
+    const result = mesh(combined, material, 0, 0, 0); result.name = name;
+    return result;
+  }
+  function duvet(cx, cz) {
+    // Extra samples are concentrated on the rounded mattress shoulder and
+    // the foot. The large, gently inflated central surface stays inexpensive.
+    const xs = sampleAxis([[-1.25, -1.02, 12], [-1.02, -.84, 20], [-.84, .84, 88], [.84, 1.02, 20], [1.02, 1.25, 12]]);
+    const zs = sampleAxis([[-.82, .99, 100], [.99, 1.25, 32], [1.25, 1.47, 14]]);
+    const tension = [
+      [-.84, -.59, -.26, -.05, .081, .038, .8],
+      [.77, -.71, .16, -.08, .098, .044, 2.1],
+      [-.86, .26, -.23, .65, .073, .039, 1.2],
+      [.83, .36, .23, .82, .088, .047, 2.8],
+      [-.45, 1.12, -.21, .58, .065, .031, .3],
+      [.49, 1.14, .11, .78, .071, .035, 1.5],
+      [-.37, -.67, -.08, -.27, .054, .021, 2.4],
+    ].map(([ax, az, bx, bz, width, height, phase]) => {
+      const dx = bx - ax, dz = bz - az, length = Math.hypot(dx, dz);
+      return { ax, az, dx: dx / length, dz: dz / length, length, width, height, phase };
+    });
+    function surfaceFolds(x, z) {
+      let height = .005 * Math.sin(x * 4.1 + z * 2.7) + .003 * Math.sin(z * 6.8 - x * 3.2);
+      height += .014 * Math.exp(-(((x - .25) / .45) ** 2 + ((z - .31) / .62) ** 2));
+      height -= .008 * Math.exp(-(((x + .13) / .39) ** 2 + ((z + .37) / .30) ** 2));
+      for (const f of tension) {
+        const dx = x - f.ax, dz = z - f.az;
+        const along = (dx * f.dx + dz * f.dz) / f.length;
+        if (along < -.1 || along > 1.1) continue;
+        const taper = smooth01((along + .1) / .28) * smooth01((1.1 - along) / .36);
+        const bend = Math.sin(along * Math.PI * 1.4 + f.phase) * .023;
+        const across = -dx * f.dz + dz * f.dx - bend;
+        const width = f.width * (1.13 - smooth01(along) * .28);
+        height += (Math.exp(-((across / width) ** 2)) - .21 * Math.exp(-(((across + width * 1.5) / (width * 1.2)) ** 2))) * f.height * taper;
+      }
+      return height;
+    }
+    function sample(u, v) {
+      // The far corners are rounded in rest space. This removes the long,
+      // triangular points produced by dropping a rectangular grid vertically.
+      const corner = .20, start = 1.47 - corner;
+      const end = Math.max(0, v - start);
+      const rowHalfWidth = v > start ? 1.25 - corner + Math.sqrt(Math.max(0, corner * corner - end * end)) : 1.25;
+      let x = u / 1.25 * rowHalfWidth;
+      const scallop = smooth01((Math.abs(x) - .78) / .43);
+      x += Math.sign(x) * Math.sin(v * 8.1 + .7) * .012 * scallop;
+      const footWaver = Math.sin(u * 7.2 + .8) * .014 * smooth01((v - 1.04) / .4);
+      const z = v + footWaver;
+      const side = Math.max(0, Math.abs(x) - .84), foot = Math.max(0, z - 1.05);
+      const distance = Math.hypot(side, foot), radius = .11;
+      const nx = distance ? Math.sign(x) * side / distance : 0;
+      const nz = distance ? foot / distance : 0;
+      const arcLength = Math.PI * .5 * radius;
+      const theta = Math.min(Math.PI * .5, distance / radius);
+      const hanging = Math.max(0, distance - arcLength);
+      const curve = radius * Math.sin(theta);
+      const hangWeight = smooth01(hanging / .15);
+      const sidePleat = Math.sin(v * 14.8 + Math.sin(v * 4.2) + (x < 0 ? .5 : 2.1)) * .012 + Math.sin(v * 27 + .4) * .0035;
+      const footPleat = Math.sin(x * 17.2 + .5) * .012 + Math.sin(x * 29.6 + 2.2) * .004;
+      const billow = (sidePleat * Math.abs(nx) + footPleat * nz) * (.2 + hangWeight * .8);
+      const hemSway = Math.sin(v * 7 + x * 4.3) * .007 * hangWeight;
+      const topWeight = 1 - smooth01(distance / .24) * .82;
+      // A circular shoulder transitions to gravity-driven vertical cloth.
+      // Texture detail is reserved for the weave; folds exist in the mesh.
+      const y = .645 - radius * (1 - Math.cos(theta)) - hanging + surfaceFolds(x, z) * topWeight + hemSway;
+      const anchorX = THREE.MathUtils.clamp(x, -.84, .84), anchorZ = Math.min(z, 1.05);
+      let outward = curve + billow + hangWeight * .016;
+      // Below the mattress the cloth must clear the slightly wider timber
+      // rail, including its rounded foot corners. Preserve the folds above
+      // it; only ease the lower drape out onto this supporting silhouette.
+      const clearance = smooth01((.54 - y) / .135);
+      if (distance > 0 && clearance > 0) {
+        const railDistance = r => {
+          const qx = Math.abs(anchorX + nx * r) - .931;
+          const qz = Math.abs(anchorZ + nz * r) - 1.175;
+          return Math.hypot(Math.max(0, qx), Math.max(0, qz)) + Math.min(Math.max(qx, qz), 0) - .042;
+        };
+        if (railDistance(outward) < 0) {
+          let lo = outward, hi = .36;
+          for (let iteration = 0; iteration < 8; iteration++) {
+            const mid = (lo + hi) * .5;
+            if (railDistance(mid) < 0) lo = mid; else hi = mid;
+          }
+          outward += (hi - outward) * clearance;
+        }
+      }
+      const px = anchorX + nx * outward;
+      const pz = anchorZ + nz * outward;
+      return point(cx + px, y, cz + pz);
+    }
+    const material = cloneSurface(M.linen);
+    material.side = THREE.DoubleSide; material.color.multiplyScalar(.96);
+    material.normalScale?.set(.095, .095); material.roughness = 1;
+    joinedCloth(clothGrid(xs, zs, sample), clothHem(xs, zs, sample), material,
+      'Ivory duvet: rounded mattress shoulder, organic tension folds and sewn hem');
+
+    // The turned-back edge rests on the actual folded surface below it.
+    // Its gently rolled lip has no straight diagonal slab at either end.
+    const foldXs = sampleAxis([[-.94, -.78, 14], [-.78, .78, 72], [.78, .94, 14]]);
+    const foldZs = sampleAxis([[0, 1, 26]]);
+    const foldSample = (x, t) => {
+      const z = -.735 + t * .30 + x * .025;
+      const p = sample(x, z);
+      const rolledLip = Math.sin(t * Math.PI) * .026 + Math.exp(-(((t - .91) / .11) ** 2)) * .008;
+      p.y += .009 + rolledLip + Math.sin(x * 10.1 + t * 1.6) * .003;
+      return p;
+    };
+    const foldMaterial = cloneSurface(material); foldMaterial.color.multiplyScalar(1.02);
+    joinedCloth(clothGrid(foldXs, foldZs, foldSample, 2.1, (x, t) => [x, -.735 + t * .30 + x * .025]), clothHem(foldXs, foldZs, foldSample, .0022), foldMaterial,
+      'Soft turned-back duvet edge with a rolled sewn lip');
+    return { sample };
+  }
+  function wovenThrow(bedding) {
+    const material = cloneSurface(M.blanket); material.color.multiplyScalar(.89);
+    material.side = THREE.DoubleSide; material.roughness = .98;
+    material.normalScale?.set(.19, .19);
+    const xs = sampleAxis([[-1.22, -1.02, 12], [-1.02, -.84, 18], [-.84, .84, 80], [.84, 1.02, 18], [1.02, 1.22, 12]]);
+    const zs = sampleAxis([[.77, .99, 24], [.99, 1.26, 30], [1.26, 1.41, 14]]);
+    const sample = (x, z) => {
+      const p = bedding.sample(x, z);
+      const side = smooth01((Math.abs(x) - .8) / .34), foot = smooth01((z - 1.04) / .3);
+      const topWeight = 1 - Math.max(side, foot) * .88;
+      const softFold = Math.exp(-(((z - .91 + x * .043 + Math.sin(x * 3) * .012) / .042) ** 2)) * .023;
+      const crumple = Math.exp(-(((x - .41 + (z - .9) * .6) / .079) ** 2 + ((z - .98) / .35) ** 2)) * .022;
+      p.y += .016 + (softFold + crumple + Math.sin(x * 8 + z * 3) * .0035) * topWeight;
+      p.x += Math.sign(x) * side * .014;
+      p.z += foot * .014;
+      return p;
+    };
+    joinedCloth(clothGrid(xs, zs, sample, 1.8), clothHem(xs, zs, sample, .0026), material,
+      'Heavy woven throw following the duvet and rounded bed corners');
+    // Forty-one short yarn tassels are one mesh, rather than forty-one draws.
+    const fringeGeometry = [];
+    for (let i = 0; i < 41; i++) {
+      const x = -1.205 + i * 2.41 / 40;
+      const start = sample(x, 1.41), end = sample(x, 1.452);
+      end.y -= .004 + (1 + Math.sin(i * 2.1)) * .003;
+      end.x += Math.sin(i * 2.7) * .002;
+      const middle = start.clone().lerp(end, .55); middle.z += .002;
+      fringeGeometry.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([start, middle, end]), 4, .0016, 4, false));
+    }
+    const fringe = mesh(mergeGeometries(fringeGeometry, false), material, 0, 0, 0);
+    fringe.name = 'Fine irregular woven fringe, single static mesh';
+    fringeGeometry.forEach(geometry => geometry.dispose());
   }
   function book(width, height, depth, color) {
     const group = new THREE.Group(); room.add(group);
@@ -423,6 +655,36 @@ export function createRoom(scene, materials) {
     box(.008, height + .003, depth, -width / 2 + .003, 0, 0, cover, .002, group);
     for (let i = 0; i < 3; i++) box(.012, .0015, depth * .8, -width / 2 + .014, height / 2 + .003, 0, M.brass, 0, group);
     return group;
+  }
+  function stationery() {
+    const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 720;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#c8bfa6'; ctx.fillRect(0, 0, 512, 720);
+    const edge = ctx.createLinearGradient(0, 0, 512, 0);
+    edge.addColorStop(0, 'rgba(113,96,65,.14)'); edge.addColorStop(.04, 'rgba(113,96,65,0)');
+    edge.addColorStop(.95, 'rgba(113,96,65,0)'); edge.addColorStop(1, 'rgba(113,96,65,.12)');
+    ctx.fillStyle = edge; ctx.fillRect(0, 0, 512, 720);
+    ctx.strokeStyle = 'rgba(98,106,101,.17)'; ctx.lineWidth = 1;
+    for (let y = 142; y < 664; y += 41) {
+      ctx.beginPath(); ctx.moveTo(34, y); ctx.lineTo(478, y); ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(53,57,48,.58)'; ctx.font = 'italic 22px Georgia, serif';
+    ctx.fillText('Lembrar de comprar', 48, 100);
+    ctx.font = 'italic 20px Georgia, serif';
+    for (const [line, label] of ['café', 'pilhas', 'lâmpada 40 W', 'sabão'].entries()) {
+      ctx.fillText(label, 62 + line % 2 * 4, 177 + line * 41);
+      ctx.beginPath(); ctx.arc(46, 169 + line * 41, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    // A slight fold and a dried cup ring give the existing small prop scale.
+    ctx.strokeStyle = 'rgba(100,84,55,.08)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(377, 546, 74, .18, Math.PI * 1.82); ctx.stroke();
+    ctx.strokeStyle = 'rgba(82,76,58,.06)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(257, 0); ctx.lineTo(253, 720); ctx.stroke();
+    const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = Math.min(4, M.floor.map?.anisotropy || 4);
+    const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 1, color: '#dfd8c4' });
+    material.name = 'Used cream notepaper with an ordinary shopping list';
+    return material;
   }
   function picture(x, y, z, width, height, angle, seed) {
     const group = new THREE.Group(); group.position.set(x, y, z); group.rotation.y = angle; room.add(group);
@@ -464,7 +726,7 @@ function contactTexture() {
   return new THREE.CanvasTexture(c);
 }
 
-function patternedRug() {
+function patternedRug(photographicWeave) {
   const c = document.createElement('canvas'); c.width = 1024; c.height = 1024;
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#4d4540'; ctx.fillRect(0, 0, 1024, 1024);
@@ -488,8 +750,20 @@ function patternedRug() {
     diamond(x, y, 17, '#a18a67'); diamond(x, y, 9, '#3b463e');
     ctx.strokeStyle = '#a18a67'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y - 29); ctx.lineTo(x, y + 29); ctx.moveTo(x - 26, y); ctx.lineTo(x + 26, y); ctx.stroke();
   }
+  if (photographicWeave) {
+    ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = .5;
+    ctx.drawImage(photographicWeave, 0, 0, 1024, 1024);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  }
   let seed = 4149; const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
   for (let i = 0; i < 90000; i++) { const v = random() > .5 ? 220 : 10; ctx.fillStyle = `rgba(${v},${v},${v},${.025 + random() * .1})`; ctx.fillRect(random() * 1024, random() * 1024, 1 + random() * 2, .7); }
+  // Localised traffic wear interrupts the otherwise perfect printed motif.
+  for (let i = 0; i < 45; i++) {
+    const x = random() * 1024, y = random() * 1024, radius = 20 + random() * 110;
+    const wear = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    wear.addColorStop(0, `rgba(191,178,145,${.025 + random() * .09})`); wear.addColorStop(1, 'rgba(191,178,145,0)');
+    ctx.fillStyle = wear; ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
   ctx.globalAlpha = .08; ctx.strokeStyle = '#d4c8a6'; ctx.lineWidth = 1;
   for (let y = 0; y < 1024; y += 3) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(1024, y); ctx.stroke(); }
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
