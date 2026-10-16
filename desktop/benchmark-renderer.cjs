@@ -432,7 +432,93 @@ async function runStormAudioCheck() {
     unmuteStartup, afterUnmute, noDelayedAfterMute, beforePause, paused, resumed, resumeStartup, noDelayedAfterPause };
 }
 
+/** Qualitative motion probe; captures are deliberately separate from FPS benchmarks. */
+async function runBodycamPhase(plan) {
+  const room = window.Quarto01, delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  const pressed = new Set(), names = { KeyW: 'w', KeyS: 's', ShiftLeft: 'Shift' };
+  function useKeys(codes) {
+    for (const code of pressed) if (!codes.includes(code)) {
+      document.dispatchEvent(new KeyboardEvent('keyup', { code, key: names[code], bubbles: true })); pressed.delete(code);
+    }
+    for (const code of codes) if (!pressed.has(code)) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { code, key: names[code], bubbles: true })); pressed.add(code);
+    }
+  }
+  if (!room.setDiagnosticView(plan.view)) throw new Error('Pose Bodycam invalida: ' + plan.view);
+  await delay(300);
+  const before = room.getPerformanceSnapshot(), telemetry = [], mouseInputs = [];
+  const guard = createTimingGuard(room), start = performance.now();
+  let lastYaw = 0, lastPitch = 0;
+  function sample(elapsedMs) {
+    const s = room.getPerformanceSnapshot();
+    return { elapsedMs, bodycam: s.bodycam, gait: s.gait, playerPosition: s.playerPosition,
+      cameraPosition: s.cameraPosition, cameraQuaternion: s.cameraQuaternion,
+      cameraYaw: s.cameraYaw, cameraPitch: s.cameraPitch, moving: s.moving, running: s.running,
+      paused: s.paused, focused: document.hasFocus(), hidden: document.hidden,
+      points: s.renderStats.points, shadow: { active: s.playerShadow.active, position: s.playerShadow.position } };
+  }
+  try {
+    while (performance.now() - start < plan.activeMs + 1800) {
+      const elapsedMs = performance.now() - start, active = elapsedMs < plan.activeMs;
+      if (active && plan.move) {
+        const forward = plan.collision || Math.floor(elapsedMs / (plan.run ? 450 : 600)) % 2 === 0;
+        useKeys([forward ? 'KeyW' : 'KeyS', ...(plan.run ? ['ShiftLeft'] : [])]);
+      } else useKeys([]);
+      if (active && plan.look) {
+        const t = elapsedMs / 1000, yaw = Math.sin(t * 2.8) * .30, pitch = Math.sin(t * 2.2) * .10;
+        const dx = -(yaw - lastYaw) / .0022, dy = -(pitch - lastPitch) / .0022;
+        const previous = room.getPerformanceSnapshot(); room.diagnosticLook(dx, dy);
+        const current = room.getPerformanceSnapshot();
+        mouseInputs.push({ requestedYaw: -.0022 * dx, appliedYaw: current.cameraYaw - previous.cameraYaw,
+          requestedPitch: -.0022 * dy, appliedPitch: current.cameraPitch - previous.cameraPitch });
+        lastYaw = yaw; lastPitch = pitch;
+      }
+      const s = sample(elapsedMs); telemetry.push(s);
+      window.__quartoBodycamProbe = { phase: plan.id, elapsedMs, snapshot: s };
+      await nextFrame();
+    }
+  } finally { useKeys([]); }
+  const elapsedMs = performance.now() - start, after = room.getPerformanceSnapshot();
+  const frameCount = after.totalFrames - before.totalFrames, trace = room.getPerformanceTrace();
+  const timingIntegrity = guard.finish(trace.frameTimes.slice(-frameCount), elapsedMs, telemetry);
+  const finite = telemetry.every(s => s.bodycam && Object.values(s.bodycam).every(Number.isFinite));
+  const bounds = finite && telemetry.every(s => Math.abs(s.bodycam.mountHeight - 1.45) < 1e-6 &&
+    Math.abs(s.bodycam.offsetY) <= .034001 && Math.hypot(s.bodycam.offsetX, s.bodycam.offsetZ) <= .025001 &&
+    Math.abs(s.bodycam.roll) <= .038001 && Math.abs(s.bodycam.pitch) <= .026001 && Math.abs(s.bodycam.yaw) <= .010801 &&
+    Math.abs(s.cameraPosition.y - (1.45 + s.bodycam.offsetY)) < 1e-6 &&
+    Math.abs(Math.hypot(s.cameraPosition.x - s.playerPosition.x, s.cameraPosition.z - s.playerPosition.z) -
+      Math.hypot(s.bodycam.offsetX, s.bodycam.offsetZ)) < 1e-6);
+  const range = (samples, key) => Math.max(...samples.map(s => s.bodycam[key])) - Math.min(...samples.map(s => s.bodycam[key]));
+  const activeSamples = telemetry.filter(s => s.elapsedMs < plan.activeMs), moving = activeSamples.filter(s => s.moving);
+  const tail = telemetry.filter(s => s.elapsedMs > plan.activeMs + 1300);
+  const motionKeys = ['offsetX', 'offsetY', 'offsetZ', 'roll', 'pitch', 'yaw'];
+  const settled = tail.length >= 10 && tail.every(s => !s.moving && s.gait.blend === 0 &&
+    motionKeys.every(key => Math.abs(s.bodycam[key]) < .0001)) &&
+    Math.hypot(tail.at(-1).playerPosition.x - tail[0].playerPosition.x, tail.at(-1).playerPosition.z - tail[0].playerPosition.z) < .0001;
+  const motionVisible = !plan.move || plan.collision || (moving.length > 20 && range(moving, 'offsetY') >= .015 &&
+    range(moving, 'roll') >= .006 && Math.max(...moving.map(s => s.bodycam.stepCount)) >= 1);
+  const runVerified = !plan.run || moving.some(s => s.running && s.gait.runBlend > .8 && s.gait.speed > 1.4);
+  const mouseImmediate = !plan.look || (mouseInputs.length > 30 && mouseInputs.every(s =>
+    Math.abs(s.requestedYaw - s.appliedYaw) < 1e-6 && Math.abs(s.requestedPitch - s.appliedPitch) < 1e-6));
+  const blocked = telemetry.filter(s => s.elapsedMs > plan.activeMs - 800 && s.elapsedMs < plan.activeMs);
+  const collisionStopped = !plan.collision || (blocked.length > 20 && blocked.every(s => !s.moving && s.gait.speed < .001 &&
+    s.gait.blend < .0001 && s.bodycam.stepCount === blocked[0].bodycam.stepCount &&
+    Math.hypot(s.playerPosition.x - blocked[0].playerPosition.x, s.playerPosition.z - blocked[0].playerPosition.z) < .0001));
+  const noParticles = telemetry.every(s => s.points === 0), shadowActive = telemetry.every(s => s.shadow.active);
+  const measurements = { verticalRange: range(activeSamples, 'offsetY'), rollRange: range(activeSamples, 'roll'),
+    maxHorizontalOffset: Math.max(...telemetry.map(s => Math.hypot(s.bodycam.offsetX, s.bodycam.offsetZ))),
+    maxSpeed: Math.max(...activeSamples.map(s => s.gait.speed)), steps: Math.max(...telemetry.map(s => s.bodycam.stepCount)),
+    settledMaxOffset: Math.max(...tail.flatMap(s => motionKeys.map(key => Math.abs(s.bodycam[key])))) };
+  return { ...plan, passed: timingIntegrity.valid && bounds && settled && motionVisible && runVerified && mouseImmediate &&
+    collisionStopped && noParticles && shadowActive, before, after, telemetry, mouseInputs, timingIntegrity,
+    bounds, settled, motionVisible, runVerified, mouseImmediate, collisionStopped, noParticles, shadowActive, measurements };
+}
+
 module.exports = {
+  buildBodycamPhaseScript(plan) {
+    return '(() => { const createTimingGuard = ' + createTimingGuard.toString() + '; return (' + runBodycamPhase.toString() + ')(' + JSON.stringify(plan) + '); })()';
+  },
   buildBenchmarkScript(quality) {
     return '(() => { const createTimingGuard = ' + createTimingGuard.toString() + '; return (' + runRendererBenchmark.toString() + ')(' + JSON.stringify(quality) + '); })()';
   },

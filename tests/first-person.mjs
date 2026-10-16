@@ -33,8 +33,8 @@ function emit(target,type,values={}) {
 }
 const key=(type,code)=>emit(doc,type,{code});
 function checkCamera() {
-  assert.ok(Math.abs(camera.position.y-1.62)<=.018,'Human eye motion stays within 18 mm of standing height');
-  assert.ok(Math.hypot(camera.position.x-controls.position.x,camera.position.z-controls.position.z)<=.009,'Lateral head sway stays below 9 mm');
+  assert.ok(Math.abs(camera.position.y-1.45)<=.036,'Chest motion stays within 36 mm of its 1.45 m mount');
+  assert.ok(Math.hypot(camera.position.x-controls.position.x,camera.position.z-controls.position.z)<=.025,'Chest translation stays within 25 mm of the collision body');
   assert.equal(controls.mode,'first-person');
 }
 const tick=(n=1)=>{for(let i=0;i<n;i++){controls.update(1/60);checkCamera();}};
@@ -57,7 +57,7 @@ tick(600);assert.ok(controls.position.x<=2.75&&controls.position.z<=2.9,'Room bo
 // Natural gait is tied to travelled distance, with a gradual start and no
 // residual stepping when a collider prevents the player from moving.
 assert.equal(controls.setDiagnosticPose({position:[0,2.5],yaw:0,pitch:0}),true);
-assert.equal(controls.gait.phase,0);assert.equal(controls.gait.blend,0);assert.equal(camera.position.y,1.62);
+assert.equal(controls.gait.phase,0);assert.equal(controls.gait.blend,0);assert.equal(camera.position.y,1.45);
 const gaitReference=controls.gait,heights=[];
 key('keydown','KeyW');tick();const firstStepSpeed=controls.speed;
 assert.ok(firstStepSpeed>0&&firstStepSpeed<.3,'Walking transfers weight before reaching full speed');
@@ -66,18 +66,18 @@ assert.ok(Math.abs(controls.gait.phase-firstDistance/1.24*Math.PI*2)<1e-8,'Step 
 for(let i=0;i<99;i++){tick();heights.push(camera.position.y);}
 assert.equal(controls.gait,gaitReference,'Shared gait does not allocate a new object per frame');
 assert.ok(controls.speed>1.1&&controls.speed<1.13,'Walking reaches the intended human pace');
-assert.ok(Math.max(...heights)-Math.min(...heights)>.008,'Walking has restrained visible vertical motion');
-assert.ok(Math.abs(heights.reduce((sum,y)=>sum+y,0)/heights.length-1.62)<.003,'Walking preserves mean eye height');
+assert.ok(Math.max(...heights)-Math.min(...heights)>.025,'Chest-mounted walking has visible torso travel');
+assert.ok(Math.abs(heights.reduce((sum,y)=>sum+y,0)/heights.length-1.45)<.006,'Walking preserves mean chest height');
 key('keyup','KeyW');const releasedAt=controls.position.clone();tick(90);
 assert.ok(controls.position.distanceTo(releasedAt)<.11,'Stopping does not slide more than 11 cm');
-assert.equal(controls.gait.blend,0);assert.equal(camera.position.y,1.62);assert.equal(controls.changed,false);
+assert.equal(controls.gait.blend,0);assert.equal(camera.position.y,1.45);assert.equal(controls.changed,false);
 assert.equal(controls.setDiagnosticPose({position:[0,.43],yaw:0,pitch:0}),true);
 key('keydown','KeyW');tick(90);const blockedPhase=controls.gait.phase;tick(30);
 assert.equal(controls.gait.phase,blockedPhase,'Walking into furniture never advances footsteps');
-assert.equal(controls.gait.speed,0);assert.equal(controls.gait.blend,0);assert.equal(camera.position.y,1.62);
+assert.equal(controls.gait.speed,0);assert.equal(controls.gait.blend,0);assert.equal(camera.position.y,1.45);
 assert.equal(controls.setDiagnosticPose({position:[0,1],yaw:.5,pitch:-.1}),true);
 assert.equal(controls.gait.phase,0);assert.equal(controls.gait.blend,0);assert.equal(controls.gait.runBlend,0);
-assert.equal(camera.position.y,1.62,'Diagnostic poses start with a settled camera');
+assert.equal(camera.position.y,1.45,'Diagnostic poses start with a settled chest camera');
 controls.diagnosticLook(0,10000);assert.equal(controls.pitch,-1.42,'Mouse can look down far enough to inspect feet');
 controls.diagnosticLook(0,-20000);assert.equal(controls.pitch,1.15,'Upward mouse limit stays unchanged');
 assert.equal(controls.setDiagnosticPose({position:[0,1],yaw:0,pitch:-2}),true);
@@ -90,7 +90,7 @@ assert.ok(camera.quaternion.angleTo(originalQuaternion)<1e-8,'Reset restores loo
 emit(canvas,'pointerdown',{button:0,pointerId:1,pointerType:'touch',clientX:0,clientY:0});
 emit(canvas,'pointermove',{pointerId:1,clientX:120,clientY:45});tick();
 assert.ok(camera.quaternion.angleTo(originalQuaternion)>.1);assert.equal(controls.changed,true);
-emit(canvas,'pointerup',{pointerId:1});tick(2);assert.equal(controls.changed,false);
+emit(canvas,'pointerup',{pointerId:1});tick(45);assert.equal(controls.changed,false);
 assert.equal(lockRequests,0,'No pointer lock before a mouse click');
 emit(canvas,'pointerdown',{button:0,pointerId:3,pointerType:'mouse',clientX:0,clientY:0});assert.equal(lockRequests,1,'A single mouse click requests pointer lock');
 const dragQuaternion=camera.quaternion.clone();
@@ -113,4 +113,4 @@ key('keydown','KeyW');tick(10);assert.ok(controls.position.distanceTo(disposedAt
 assert.equal(raycasts,0);
 THREE.Raycaster.prototype.intersectObjects=originalRaycast;
 const mean=timings.reduce((a,b)=>a+b,0)/timings.length;timings.sort((a,b)=>a-b);
-console.log(JSON.stringify({firstPersonOnly:'OK',vHasNoAction:'OK',legacyViewButtonHasNoAction:'OK',standingEyeHeight:1.62,maxVerticalSwayMeters:.018,maxLateralSwayMeters:.009,naturalAcceleration:'OK',distanceDrivenGait:'OK',blockedGaitStops:'OK',idleCameraSettles:'OK',collisionAndSliding:'OK',walkingAndRunning:'OK',roomBounds:'OK',resetClearsKeys:'OK',dragAndPointerLock:'OK',nativeF11:'OK',dispose:'OK',sceneRaycasts:raycasts,controllerMeanMs:+mean.toFixed(5),controllerP95Ms:+timings[Math.floor(timings.length*.95)].toFixed(5)}));
+console.log(JSON.stringify({firstPersonOnly:'OK',vHasNoAction:'OK',legacyViewButtonHasNoAction:'OK',chestMountHeight:1.45,maxVerticalSwayMeters:.036,maxHorizontalSwayMeters:.025,naturalAcceleration:'OK',distanceDrivenGait:'OK',blockedGaitStops:'OK',idleCameraSettles:'OK',collisionAndSliding:'OK',walkingAndRunning:'OK',roomBounds:'OK',resetClearsKeys:'OK',dragAndPointerLock:'OK',nativeF11:'OK',dispose:'OK',sceneRaycasts:raycasts,controllerMeanMs:+mean.toFixed(5),controllerP95Ms:+timings[Math.floor(timings.length*.95)].toFixed(5)}));

@@ -4,10 +4,10 @@ Um único quarto 3D de terror psicológico, explorado exclusivamente em primeira
 
 [Baixar a versão Windows](https://github.com/Gabriell12321/OCO/releases/latest). Extraia o ZIP completo e abra `Quarto 01.exe`.
 
-A versão **0.10.0** refaz a cadeira da escrivaninha: pernas afiladas,
-encosto curvo, encaixes de madeira e assento estofado com costura.
-Os materiais usam veios orientados por peça e trama de tecido em escala
-real. As mudanças estão em [ATUALIZACAO-0.10.0.md](ATUALIZACAO-0.10.0.md).
+A versão **0.11.0** traz uma câmera corporal: visão mais ampla, distorção
+suave da lente e movimento ligado aos passos, às viradas e à transferência
+de peso. O quarto continua exclusivamente em primeira pessoa, sem armas.
+As mudanças estão em [ATUALIZACAO-0.11.0.md](ATUALIZACAO-0.11.0.md).
 
 A chuva natural e os trovões com clarão vermelho pela janela continuam
 presentes, junto das gotas no vidro e falhas do abajur. Clique no quarto
@@ -28,7 +28,14 @@ Versão Windows portátil: abra `Windows/Quarto 01/Quarto 01.exe`, na pasta acim
 
 A versão desktop reutiliza as sombras estáticas, controla a resolução interna e limita a apresentação a 60 quadros por segundo. Os perfis **Desempenho**, **Equilibrado** e **Qualidade** permitem trocar a qualidade durante o jogo. O perfil inicial é Desempenho, com resolução adaptativa. O tratamento de cor AgX preserva a transição entre a luz do abajur e as sombras do quarto; FXAA suaviza as bordas depois desse tratamento, sem o custo de MSAA 4×. Veja as medições em [VALIDACAO.md](VALIDACAO.md).
 
-A caminhada acelera e freia suavemente. A passada acompanha a distância realmente percorrida, com deslocamento discreto da câmera na altura dos olhos; ao parar ou encostar em um móvel, os passos cessam. O campo de visão mais contido evita a distorção excessiva de grande-angular. Verniz gasto, tecido iluminado do abajur e preenchimento nas sombras dão mais leitura aos materiais.
+A câmera fica a 1,45 m, na altura do peito. A caminhada tem balanço lateral,
+impactos curtos e inclinação na aceleração e na freada; a corrida acentua
+esse movimento. Os passos acompanham a distância realmente percorrida e
+cessam ao bloquear em um móvel. O mouse controla a direção imediatamente,
+com acomodação secundária curta. Ao parar, a câmera se estabiliza.
+A lente curva discretamente as bordas e escurece os cantos, preservando
+a leitura do centro da imagem. A cadeira remodelada na versão 0.10.0
+mantém encosto curvo, madeira com veios orientados e assento costurado.
 
 O atalho `ABRIR QUARTO.cmd`, na pasta acima, também abre o aplicativo Windows. Para desenvolvimento, `npm start` continua disponível nesta pasta.
 

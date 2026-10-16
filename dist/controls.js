@@ -1,6 +1,6 @@
 ﻿import * as THREE from 'three';
 
-/** Metre-scaled first-person walking with a distance-driven, restrained human gait. */
+/** First-person chest camera. One distance clock drives its steps and the human shadow. */
 export function createControls(camera, canvas, colliders = [], avatar = null, scene = null) {
   const spawn = new THREE.Vector3(1.5, 0, 1.2);
   const position = spawn.clone();
@@ -12,15 +12,21 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
   const pressed = code => keyboard.has(code) || touchKeys.has(code);
   const movementCodes = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
   const radius = .22;
-  const eyeHeight = 1.62, walkSpeed = 1.12, runSpeed = 1.82;
+  const mountHeight = 1.45, walkSpeed = 1.12, runSpeed = 1.82;
   const minPitch = -1.42, maxPitch = 1.15;
   // One phase is a complete left/right stride. This shared clock drives both
   // the camera and the shadow: pushing against furniture cannot walk in place.
   const gait = { phase: 0, blend: 0, strideLength: 1.24, speed: 0, localX: 0, localZ: 0, runBlend: 0 };
-  let swayX = 0, swayY = 0, swayRoll = 0;
+  // Public, allocation-free telemetry. Offsets are metres in the body's local
+  // right/up/back axes; secondary angles are radians, separate from mouse aim.
+  const bodycam = { mountHeight, offsetX: 0, offsetY: 0, offsetZ: 0,
+    roll: 0, pitch: 0, yaw: 0, stepImpact: 0, stepCount: 0, accelerationX: 0, accelerationZ: 0 };
+  const motionKeys = ['offsetX', 'offsetY', 'offsetZ', 'roll', 'pitch', 'yaw', 'accelerationX', 'accelerationZ'];
+  let lookYaw = 0, lookPitch = 0, lookRoll = 0;
+  let actualVelocityX = 0, actualVelocityZ = 0, impactAge = 1, impactStrength = 0;
   const cameraInputPosition = new THREE.Vector3(Infinity, Infinity, Infinity);
   let cameraInputYaw = NaN, cameraInputPitch = NaN;
-  let cameraInputSwayX = NaN, cameraInputSwayY = NaN, cameraInputRoll = NaN;
+  const cameraInputMotion = { offsetX: NaN, offsetY: NaN, offsetZ: NaN, roll: NaN, pitch: NaN, yaw: NaN };
   const previousPosition = new THREE.Vector3(Infinity, Infinity, Infinity);
   const previousCamera = new THREE.Vector3(Infinity, Infinity, Infinity);
   const previousQuaternion = new THREE.Quaternion();
@@ -48,13 +54,21 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
     moving = false; running = false; speed = 0;
     gait.phase = 0; gait.blend = 0; gait.strideLength = 1.24;
     gait.speed = 0; gait.localX = 0; gait.localZ = 0; gait.runBlend = 0;
-    swayX = 0; swayY = 0; swayRoll = 0;
+    for (const key of Object.keys(bodycam)) if (key !== 'mountHeight') bodycam[key] = 0;
+    lookYaw = 0; lookPitch = 0; lookRoll = 0;
+    actualVelocityX = 0; actualVelocityZ = 0; impactAge = 1; impactStrength = 0;
     updateExploring();
   }
 
   function applyLook(dx, dy, sensitivity = .0022) {
-    yaw -= dx * sensitivity;
+    const yawDelta = -dx * sensitivity, oldPitch = pitch;
+    yaw += yawDelta;
     pitch = THREE.MathUtils.clamp(pitch - dy * sensitivity, minPitch, maxPitch);
+    // The full input changes aim immediately. Only this small, bounded mount
+    // accommodation settles afterwards; there is no filtered mouse target.
+    lookYaw = THREE.MathUtils.clamp(lookYaw - yawDelta * .035, -.006, .006);
+    lookPitch = THREE.MathUtils.clamp(lookPitch - (pitch - oldPitch) * .025, -.004, .004);
+    lookRoll = THREE.MathUtils.clamp(lookRoll - yawDelta * .065, -.014, .014);
   }
 
   function requestMouseLook() {
@@ -129,16 +143,18 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
 
   function updateCamera() {
     if (position.equals(cameraInputPosition) && yaw === cameraInputYaw && pitch === cameraInputPitch &&
-        swayX === cameraInputSwayX && swayY === cameraInputSwayY && swayRoll === cameraInputRoll) return;
+        bodycam.offsetX === cameraInputMotion.offsetX && bodycam.offsetY === cameraInputMotion.offsetY &&
+        bodycam.offsetZ === cameraInputMotion.offsetZ && bodycam.roll === cameraInputMotion.roll &&
+        bodycam.pitch === cameraInputMotion.pitch && bodycam.yaw === cameraInputMotion.yaw) return;
     cameraInputPosition.copy(position); cameraInputYaw = yaw;
     cameraInputPitch = pitch;
-    cameraInputSwayX = swayX; cameraInputSwayY = swayY; cameraInputRoll = swayRoll;
-    orientation.set(pitch, yaw, swayRoll, 'YXZ');
+    Object.assign(cameraInputMotion, bodycam);
+    orientation.set(THREE.MathUtils.clamp(pitch + bodycam.pitch, minPitch, maxPitch), yaw + bodycam.yaw, bodycam.roll, 'YXZ');
     camera.quaternion.setFromEuler(orientation);
     camera.position.copy(position);
-    camera.position.x += Math.cos(yaw) * swayX;
-    camera.position.z -= Math.sin(yaw) * swayX;
-    camera.position.y = eyeHeight + swayY;
+    camera.position.x += Math.cos(yaw) * bodycam.offsetX + Math.sin(yaw) * bodycam.offsetZ;
+    camera.position.z += -Math.sin(yaw) * bodycam.offsetX + Math.cos(yaw) * bodycam.offsetZ;
+    camera.position.y = mountHeight + bodycam.offsetY;
   }
 
   function updateGait(dt, dx, dz) {
@@ -147,7 +163,14 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
     gait.runBlend = THREE.MathUtils.damp(gait.runBlend, running ? 1 : 0, 7, dt);
     gait.strideLength = THREE.MathUtils.lerp(1.24, 1.58, gait.runBlend);
     if (distance > 1e-8) {
-      gait.phase = (gait.phase + distance / gait.strideLength * Math.PI * 2) % (Math.PI * 2);
+      const nextPhase = gait.phase + distance / gait.strideLength * Math.PI * 2;
+      // A contact only happens after actual travel. A held key against a wall
+      // cannot generate impacts, even while movement velocity is being clamped.
+      if (Math.floor(nextPhase / Math.PI) > Math.floor(gait.phase / Math.PI)) {
+        impactAge = 0; impactStrength = Math.min(1, speed / walkSpeed);
+        bodycam.stepCount++;
+      }
+      gait.phase = nextPhase % (Math.PI * 2);
       gait.localX = (Math.cos(yaw) * dx - Math.sin(yaw) * dz) / distance;
       gait.localZ = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / distance;
     } else {
@@ -157,17 +180,45 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
     gait.blend = THREE.MathUtils.damp(gait.blend, targetBlend, moving ? 9 : 14, dt);
     if (!moving && gait.blend < .0001) gait.blend = 0;
     if (!running && gait.runBlend < .0001) gait.runBlend = 0;
+    const nextVelocityX = dt > 0 ? dx / dt : 0, nextVelocityZ = dt > 0 ? dz / dt : 0;
+    const accelerationX = dt > 0 ? (nextVelocityX - actualVelocityX) / dt : 0;
+    const accelerationZ = dt > 0 ? (nextVelocityZ - actualVelocityZ) / dt : 0;
+    actualVelocityX = nextVelocityX; actualVelocityZ = nextVelocityZ;
+    const localAccelerationX = Math.cos(yaw) * accelerationX - Math.sin(yaw) * accelerationZ;
+    const localAccelerationZ = Math.sin(yaw) * accelerationX + Math.cos(yaw) * accelerationZ;
+    bodycam.accelerationX = THREE.MathUtils.damp(bodycam.accelerationX, THREE.MathUtils.clamp(localAccelerationX, -8, 8), 14, dt);
+    bodycam.accelerationZ = THREE.MathUtils.damp(bodycam.accelerationZ, THREE.MathUtils.clamp(localAccelerationZ, -8, 8), 14, dt);
+    lookYaw = THREE.MathUtils.damp(lookYaw, 0, 24, dt);
+    lookPitch = THREE.MathUtils.damp(lookPitch, 0, 24, dt);
+    lookRoll = THREE.MathUtils.damp(lookRoll, 0, 20, dt);
+    impactAge += dt;
+    bodycam.stepImpact = impactAge < .25 ? Math.sin(impactAge * 46) * Math.exp(-impactAge * 23) *
+      THREE.MathUtils.lerp(.008, .012, gait.runBlend) * impactStrength : 0;
     const amplitude = gait.blend * THREE.MathUtils.lerp(1, 1.35, gait.runBlend);
-    // Pelvis/eye stabilization leaves only millimetres of lateral sway and
-    // about a centimetre of vertical travel. No continuous idle bobbing.
-    const vertical = (.010 * Math.cos(gait.phase * 2) - .002 * Math.cos(gait.phase * 4)) * amplitude;
-    const lateral = .006 * Math.sin(gait.phase) * amplitude;
-    const roll = -.0011 * Math.sin(gait.phase) * amplitude;
-    swayX = THREE.MathUtils.damp(swayX, lateral, 16, dt);
-    swayY = THREE.MathUtils.damp(swayY, vertical, 16, dt);
-    swayRoll = THREE.MathUtils.damp(swayRoll, roll, 16, dt);
-    if (!gait.blend && Math.abs(swayX) < .00001 && Math.abs(swayY) < .00001 && Math.abs(swayRoll) < .00001) {
-      swayX = 0; swayY = 0; swayRoll = 0;
+    const stride = gait.phase;
+    // The chest follows the torso more than an eye camera does. The low
+    // frequency stride carries weight; short contacts add a restrained dip.
+    const vertical = (.020 * Math.cos(stride * 2) - .003 * Math.cos(stride * 4)) * amplitude - bodycam.stepImpact;
+    const lateral = .013 * Math.sin(stride) * amplitude;
+    const longitudinal = -.005 * Math.sin(stride * 2) * amplitude + bodycam.accelerationZ * .0012;
+    const roll = -.012 * Math.sin(stride) * amplitude - .009 * gait.localX * gait.blend -
+      bodycam.accelerationX * .004 + lookRoll;
+    const tilt = (.006 * Math.sin(stride * 2) - .0025 * Math.cos(stride)) * amplitude +
+      bodycam.accelerationZ * .004 + gait.localZ * gait.blend * THREE.MathUtils.lerp(.004, .009, gait.runBlend) + lookPitch;
+    const pan = .0035 * Math.sin(stride) * amplitude + lookYaw;
+    bodycam.offsetX = THREE.MathUtils.damp(bodycam.offsetX, lateral, 24, dt);
+    bodycam.offsetY = THREE.MathUtils.damp(bodycam.offsetY, THREE.MathUtils.clamp(vertical, -.034, .034), 28, dt);
+    bodycam.offsetZ = THREE.MathUtils.damp(bodycam.offsetZ, longitudinal, 20, dt);
+    bodycam.roll = THREE.MathUtils.damp(bodycam.roll, THREE.MathUtils.clamp(roll, -.038, .038), 20, dt);
+    bodycam.pitch = THREE.MathUtils.damp(bodycam.pitch, THREE.MathUtils.clamp(tilt, -.026, .026), 20, dt);
+    bodycam.yaw = THREE.MathUtils.damp(bodycam.yaw, pan, 24, dt);
+    if (!moving && !gait.blend) {
+      for (const key of motionKeys) {
+        if (Math.abs(bodycam[key]) < .00001) bodycam[key] = 0;
+      }
+      if (Math.abs(lookYaw) < .00001) lookYaw = 0;
+      if (Math.abs(lookPitch) < .00001) lookPitch = 0;
+      if (Math.abs(lookRoll) < .00001) lookRoll = 0;
     }
   }
 
@@ -178,8 +229,7 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
   }
   listen(document.getElementById('resetBtn'), 'click', reset);
 
-  function update(delta) {
-    const dt = Math.min(Math.max(delta, 0), .05);
+  function integrate(dt) {
     const localX = Number(pressed('KeyD') || pressed('ArrowRight')) - Number(pressed('KeyA') || pressed('ArrowLeft'));
     const localZ = Number(pressed('KeyS') || pressed('ArrowDown')) - Number(pressed('KeyW') || pressed('ArrowUp'));
     const inputLength = Math.hypot(localX, localZ) || 1;
@@ -208,6 +258,14 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
     moving = speed > .025; running = requestedRun && moving;
     if (moving) direction.set(dx, 0, dz).normalize();
     updateGait(dt, dx, dz);
+  }
+
+  function update(delta) {
+    const dt = Number.isFinite(delta) ? Math.min(Math.max(delta, 0), .05) : 0;
+    // Shared fixed-size subdivisions keep the step/impact/weight response
+    // stable at 30, 60 and 120 Hz, without a second clock or catch-up backlog.
+    const steps = dt > 0 ? Math.max(1, Math.ceil(dt * 120 - 1e-8)) : 0;
+    for (let step = 0; step < steps; step++) integrate(dt / steps);
     updateCamera();
     changed = position.distanceToSquared(previousPosition) > 1e-10 ||
       camera.position.distanceToSquared(previousCamera) > 1e-10 ||
@@ -219,6 +277,10 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
     clearInput(); cleanups.forEach(cleanup => cleanup());
     if (document.pointerLockElement === canvas) document.exitPointerLock?.();
     document.body.classList.remove('exploring', 'first-person');
+  }
+
+  function suspend() {
+    clearInput(); updateCamera();
   }
 
   // The desktop's own diagnostics exercise the same camera/movement code.
@@ -239,9 +301,10 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
 
   document.body.classList.toggle('first-person', true); reset();
   return {
-    update, reset, dispose, diagnosticLook, setDiagnosticPose,
+    update, reset, dispose, suspend, diagnosticLook, setDiagnosticPose,
     get moving() { return moving; }, get running() { return running; }, get speed() { return speed; },
     get gait() { return gait; },
+    get bodycam() { return bodycam; },
     get mode() { return 'first-person'; },
     get yaw() { return yaw; }, get pitch() { return pitch; },
     get changed() { return changed; }, get position() { return position; }, get direction() { return direction; }

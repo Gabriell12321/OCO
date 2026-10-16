@@ -81,6 +81,8 @@ button { font: inherit; -webkit-tap-highlight-color: transparent; }
   transition: opacity .2s;
 }
 .exploring #crosshair { opacity: 1; }
+.bodycam-view .lens-vignette { display: none; }
+.bodycam-view #crosshair { display: none; }
 .environment-label, .controls-hint, .view-actions { transition: opacity .35s; }
 .exploring .environment-label, .exploring .controls-hint { opacity: 0; }
 .exploring .view-actions { opacity: .12; }

@@ -36,9 +36,25 @@ for(const collider of room.colliders){
 const solidMeshes=[];scene.traverse(o=>{if(o.isMesh&&!o.material.transparent)solidMeshes.push(o);});
 const windowRay=new THREE.Raycaster(new THREE.Vector3(.65,2.15,-3.14),new THREE.Vector3(0,0,-1),.08,1);
 assert.equal(windowRay.intersectObjects(solidMeshes,false).length,0,'A janela deve ter uma abertura física');
-const viewDirection=new THREE.Vector3(-.55,1.2,-1.3).sub(new THREE.Vector3(2.15,1.62,2.55)).normalize();
-const viewRay=new THREE.Raycaster(new THREE.Vector3(2.15,1.62,2.55),viewDirection,.05,20);
+const viewDirection=new THREE.Vector3(-.55,1.2,-1.3).sub(new THREE.Vector3(2.15,1.45,2.55)).normalize();
+const viewRay=new THREE.Raycaster(new THREE.Vector3(2.15,1.45,2.55),viewDirection,.05,20);
 const hits=viewRay.intersectObjects(solidMeshes,false);assert.ok(hits.length>0&&hits[0].distance>1,'A câmera deve enxergar o interior do quarto');
+// Keep the chest camera's near field clear around the room's real furniture.
+// Extreme offset samples include more motion than the controller permits.
+const chestCamera=new THREE.PerspectiveCamera(76,1900/977,.045,45);
+let bodycamClearanceSamples=0;
+for(const pose of [
+ [1.5,1.2,.6868176498,-.12], [.85,.3,.77,-.4],
+ [1.5,-1.6,-2.299,0], [.7,-.8,-2.975,-1.38], [2.75,1.65,-Math.PI/2,0],
+]) for(const offset of [[0,0,0],[.04,.036,.04],[-.04,-.036,-.04]]) {
+ chestCamera.position.set(pose[0]+offset[0],1.45+offset[1],pose[1]+offset[2]);
+ chestCamera.rotation.set(pose[3],pose[2],0,'YXZ');chestCamera.updateMatrixWorld(true);
+ for(const x of [-1,0,1])for(const y of [-1,0,1]){
+  const ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2(x,y),chestCamera);ray.far=.10;
+  assert.equal(ray.intersectObjects(solidMeshes,false).length,0,'Câmera corporal não atravessa móveis nem paredes no campo próximo');
+  bodycamClearanceSamples++;
+ }
+}
 function verifyAssets(directory){
  for(const entry of fs.readdirSync(directory,{withFileTypes:true})){
   const file=path.join(directory,entry.name);
@@ -47,4 +63,4 @@ function verifyAssets(directory){
  }
 }
 verifyAssets('dist/assets');
-console.log(JSON.stringify({meshes,vertices,triangles,colliders:room.colliders.length,windowOpening:'OK',initialView:'OK',assets:'OK'}));
+console.log(JSON.stringify({meshes,vertices,triangles,colliders:room.colliders.length,windowOpening:'OK',initialView:'OK',bodycamClearanceSamples,assets:'OK'}));

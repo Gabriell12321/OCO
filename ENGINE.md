@@ -13,6 +13,15 @@ essa conversão. Redimensionar, trocar de perfil e liberar recursos passam
 pelo mesmo módulo. Os caminhos sem FXAA/MSAA permanecem disponíveis para
 diagnóstico comparável.
 
+`dist/engine/bodycam-lens.js` acrescenta a óptica de câmera corporal ao
+`OutputPass` existente. O remapeamento radial trabalha no HDR antes de
+AgX/sRGB e FXAA, com vinheta e pequena separação de cor na periferia.
+O domínio de amostragem permanece dentro da imagem em qualquer proporção;
+a separação de cor desaparece junto à borda. Não há alvo de imagem, passe,
+textura, histórico temporal ou upload por quadro adicional. A interface
+HTML fica fora da lente. O diagnóstico pode desligar a lente por uniform,
+mantendo câmera, FOV e resolução para comparar somente seu custo.
+
 `dist/engine/static-scene.js` compila a cena imutável em lotes por material e
 região. Mantém índices de vértices, transformações, normais, sombras e limites
 espaciais. Objetos dinâmicos, transparentes, instanciados e com esqueleto não
@@ -37,6 +46,17 @@ pixels, mantendo a proporção da janela. Os testes de comparação travam essa
 escala em 1, para não atribuir a uma otimização o ganho de uma resolução menor.
 
 ## Conteúdo e materiais
+
+`dist/controls.js` mantém a posição física e o rumo do jogador separados
+dos movimentos secundários da câmera de peito. Um relógio de distância
+compartilhado com a sombra dirige a passada e os impactos. Subdivisões de
+até 1/120 s integram aceleração, colisão e transferência de peso. O mouse
+altera o rumo imediatamente; pequenas rotações secundárias amortecem em
+seguida. A câmera fica a 1,45 m, com FOV vertical de projeção de 76° e
+deslocamento horizontal limitado a 25 mm. A lente recorta parte desse
+campo; ele não equivale ao FOV final de uma projeção retilínea.
+Pausa, perda de foco e reset limpam impulsos e entradas. A anatomia da
+sombra continua ligada ao chão e ao rumo físico, sem herdar o roll da lente.
 
 `dist/bedroom/chair.js` constrói a cadeira com peças curvas, seção afilada,
 encaixes e estofado fechado. Os UVs seguem o comprimento de cada peça de
@@ -81,7 +101,8 @@ as sombras e os mipmaps, com duas leituras de textura em vez de três.
 
 `window.Quarto01.getPerformanceSnapshot()` expõe, no diagnóstico local, o
 backend, estatísticas dos lotes, triângulos da cama, resolução, frametimes e
-tempos de GPU. A interface do jogo continua dedicada a explorar o quarto.
+tempos de GPU. Também inclui FOV, altura, offsets/rotações da câmera e estado
+da lente. A interface do jogo continua dedicada a explorar o quarto.
 
 ## Validação
 
@@ -89,3 +110,6 @@ tempos de GPU. A interface do jogo continua dedicada a explorar o quarto.
 ciclo de vida do pipeline, as superfícies da cama e os dados dos materiais,
 além dos controles e da sombra humana. O diagnóstico `--benchmark-bed`
 compara os mesmos ângulos no aplicativo real. Medições em `VALIDACAO.md`.
+O diagnóstico `--benchmark-bodycam` inspeciona enquadramento, movimento,
+assentamento, colisão e pares de lente ligada/desligada. O teste completo
+de 35 segundos mede caminhada, corrida e mouse com chuva, áudio e trovão.

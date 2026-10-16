@@ -137,7 +137,7 @@ function getPerformanceSnapshot() {
   const stats = monitor.snapshot();
   const width = renderer?.domElement.width || 0, height = renderer?.domElement.height || 0;
   return {
-    ...stats, version: '0.10.0', ready, quality, qualityLabel: PROFILES[quality].label,
+    ...stats, version: '0.11.0', ready, quality, qualityLabel: PROFILES[quality].label,
     character: false, firstPersonOnly: true,
     renderer: 'WebGL2', pathTracing: false, shadows: 'cached',
     engine: 'OCO', engineBackend: 'Three.js / WebGL2', engineVersion: '0.1',
@@ -158,6 +158,8 @@ function getPerformanceSnapshot() {
     playerPosition: controls ? { x: controls.position.x, y: controls.position.y, z: controls.position.z } : null,
     cameraPosition: camera ? { x: camera.position.x, y: camera.position.y, z: camera.position.z } : null,
     cameraQuaternion: camera ? camera.quaternion.toArray() : null,
+    cameraFov: camera?.fov || 0, cameraNear: camera?.near || 0,
+    bodycam: controls?.bodycam ? { ...controls.bodycam } : null,
     cameraYaw: controls?.yaw || 0, cameraPitch: controls?.pitch || 0,
     gait: controls?.gait ? { ...controls.gait } : null,
     view: 'first-person', moving: controls?.moving || false, running: controls?.running || false,
@@ -182,6 +184,7 @@ function updateDiagnostics(now) {
 }
 
 function pause() {
+  controls?.suspend?.();
   desktopPaused = true; cancelAnimationFrame(frameHandle); frameHandle = 0;
   roomAudio?.setPaused(true);
   monitor.suspend(); previousTick = previousRender = accumulator = 0;
@@ -222,7 +225,7 @@ function frame(now) {
 }
 
 window.Quarto01 = {
-  version: '0.10.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
+  version: '0.11.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
   get ready() { return ready; }, get quality() { return quality; }, get fps() { return monitor.fps; },
   get frameTimes() { return monitor.frameTimes.slice(); },
   get renderStats() { return renderer ? { ...renderer.info.render } : {}; },
@@ -231,6 +234,10 @@ window.Quarto01 = {
   diagnosticLook: (dx, dy) => controls?.diagnosticLook?.(dx, dy),
   setDiagnosticShadowEnabled: value => playerShadow?.setEnabled(value),
   setDiagnosticView: setDiagnosticView,
+  setDiagnosticLens: value => {
+    if (!window.desktopDiagnostics || !ready || typeof value !== 'boolean') return false;
+    pipeline.setBodycamEnabled(value); return true;
+  },
   setDiagnosticAtmosphere: options => {
     if (!window.desktopDiagnostics || !ready || !options || typeof options !== 'object') return false;
     if (Number.isFinite(options.time)) atmosphere.time = Math.max(0, options.time);
@@ -296,6 +303,12 @@ function setDiagnosticView(id) {
     'chair-back': { position: [.58, .2], yaw: -.7974457732516342, pitch: -.6855002113881905 },
     'chair-front': { position: [1.9, .45], yaw: .42168751919690073, pitch: -.685980825044743 },
     'chair-seat': { position: [1.15, .12], yaw: -.3498556018570981, pitch: -.9578457534154736 },
+    'bodycam-front': { position: [1.5, 1.2], yaw: .6868176498, pitch: -.12 },
+    'bodycam-bed': { position: [.85, .3], yaw: .77, pitch: -.4 },
+    'bodycam-wall': { position: [1.5, -1.6], yaw: -2.299, pitch: 0 },
+    'bodycam-down': { position: [.7, -.8], yaw: -2.975, pitch: -1.38 },
+    'bodycam-clear': { position: [1.5, 1.2], yaw: 0, pitch: -.12 },
+    'bodycam-collision': { position: [2.4, 1.65], yaw: -Math.PI / 2, pitch: 0 },
   };
   if (!poses[id] || !controls.setDiagnosticPose(poses[id])) return false;
   playerShadow?.update(controls, 0, performance.now(), true);
@@ -319,8 +332,8 @@ async function init() {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   scene = new THREE.Scene(); scene.background = new THREE.Color('#293e4d');
   scene.fog = new THREE.FogExp2(0x20272c, .007);
-  camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, .045, 45);
-  camera.position.set(2.15, 1.62, 2.55); camera.lookAt(-.55, 1.2, -1.3);
+  camera = new THREE.PerspectiveCamera(76, innerWidth / innerHeight, .045, 45);
+  camera.position.set(2.15, 1.45, 2.55); camera.lookAt(-.55, 1.2, -1.3);
   setQuality('performance');
   const [materials, environment] = await Promise.all([
     createMaterials(renderer, value => {

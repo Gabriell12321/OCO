@@ -4,7 +4,7 @@ const { app, BrowserWindow, Menu, protocol, session, ipcMain, dialog } = require
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { buildBenchmarkScript, buildBedPrepareScript, buildBedPhaseScript, buildWeatherAudioScript, buildAudioReadyScript, buildStormAudioScript } = require('./benchmark-renderer.cjs');
+const { buildBenchmarkScript, buildBedPrepareScript, buildBedPhaseScript, buildWeatherAudioScript, buildAudioReadyScript, buildStormAudioScript, buildBodycamPhaseScript } = require('./benchmark-renderer.cjs');
 
 const NO_MSAA_BENCHMARK = process.argv.includes('--benchmark-no-msaa');
 const FORCE_MSAA4_BENCHMARK = process.argv.includes('--benchmark-msaa4');
@@ -19,12 +19,13 @@ const SMOKE_PROFILE_CYCLE = process.argv.includes('--smoke-profile-cycle') || QU
 const CAPTURE_VIEWS_ONLY = process.argv.includes('--capture-views-only');
 const BED_BENCHMARK = process.argv.includes('--benchmark-bed');
 const CHAIR_BENCHMARK = process.argv.includes('--benchmark-chair');
+const BODYCAM_BENCHMARK = process.argv.includes('--benchmark-bodycam');
 const BED_SURFACE_BASE_ONLY = process.argv.includes('--capture-bed-base');
 const BED_SURFACES = process.argv.includes('--capture-bed-surfaces') || BED_SURFACE_BASE_ONLY;
 const WEATHER_BENCHMARK = process.argv.includes('--benchmark-weather');
 const AUDIO_PROBE = process.argv.includes('--probe-audio');
 const STORM_BENCHMARK = process.argv.includes('--benchmark-storm') || process.argv.includes('--probe-storm');
-const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY || BED_BENCHMARK || BED_SURFACES || WEATHER_BENCHMARK || AUDIO_PROBE || STORM_BENCHMARK || CHAIR_BENCHMARK;
+const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY || BED_BENCHMARK || BED_SURFACES || WEATHER_BENCHMARK || AUDIO_PROBE || STORM_BENCHMARK || CHAIR_BENCHMARK || BODYCAM_BENCHMARK;
 const requestedQualityArgument = process.argv.find(arg => arg.startsWith('--benchmark-quality='));
 const requestedQuality = requestedQualityArgument?.slice('--benchmark-quality='.length);
 const BENCHMARK_QUALITY = ['performance', 'balanced', 'quality'].includes(requestedQuality) ? requestedQuality : null;
@@ -375,6 +376,83 @@ async function runBedBenchmark(win) {
   } catch (error) {
     writeResult({ success: false, test: 'bed-fixed-resolution-five-views', message: String(error), errors: ERRORS });
     app.exit(1);
+  }
+}
+
+async function runBodycamBenchmark(win) {
+  try {
+    const initial = await win.webContents.executeJavaScript(buildBedPrepareScript(BENCHMARK_QUALITY || 'performance'));
+    const atmosphere = { time: 0, frozen: true, rain: false, lamp: 1, thunder: 0 };
+    await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere(' + JSON.stringify(atmosphere) + ')');
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    const captures = [], lensViews = [], phases = [];
+    for (const view of ['bodycam-front', 'bodycam-bed', 'bodycam-wall', 'bodycam-down']) {
+      const { image: _image, ...capture } = await captureAtmosphereView(win, view, view, atmosphere);
+      captures.push(capture);
+    }
+    for (const view of ['bodycam-front', 'bodycam-bed']) {
+      for (const enabled of [false, true]) {
+        await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticLens(' + enabled + ')');
+        const measured = await measureDiagnosticView(win, { id: view + (enabled ? '-lens-on' : '-lens-off'), view, duration: 4000, turn: false });
+        const { image: _image, ...capture } = await captureAtmosphereView(win, view, measured.id, atmosphere);
+        lensViews.push({ ...measured, enabled, capture });
+      }
+    }
+    const plans = [
+      { id: 'walk', view: 'bodycam-clear', move: true, activeMs: 2400 },
+      { id: 'run', view: 'bodycam-clear', move: true, run: true, activeMs: 2400 },
+      { id: 'mouse', view: 'bodycam-clear', look: true, activeMs: 2200 },
+      { id: 'collision-first', view: 'bodycam-collision', move: true, collision: true, activeMs: 4000 },
+      { id: 'collision-repeat', view: 'bodycam-collision', move: true, collision: true, activeMs: 4000 },
+    ];
+    for (const plan of plans) {
+      const interruptedAttempts = [];
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await focusDiagnosticWindow(win);
+        await win.webContents.executeJavaScript('window.__quartoBodycamProbe = null');
+        let done = false, failure = null, result = null;
+        const pending = win.webContents.executeJavaScript(buildBodycamPhaseScript(plan))
+          .then(value => { result = value; }, error => { failure = error; }).finally(() => { done = true; });
+        const frames = [], checkpoints = plan.collision ? [] : [350, 800, 1250, 1700];
+        while (!done) {
+          await new Promise(resolve => setTimeout(resolve, 120));
+          const probe = await win.webContents.executeJavaScript('window.__quartoBodycamProbe');
+          if (probe?.phase === plan.id && frames.length < checkpoints.length && probe.elapsedMs >= checkpoints[frames.length]) {
+            const filename = path.join(RESULTS_DIR, 'motion-' + plan.id + '-a' + attempt + '-' + (frames.length + 1) + '.png');
+            fs.writeFileSync(filename, (await win.webContents.capturePage()).toPNG());
+            frames.push({ filename, ...probe });
+          }
+        }
+        await pending;
+        if (failure) throw failure;
+        const filename = path.join(RESULTS_DIR, 'motion-' + plan.id + '-settled.png');
+        fs.writeFileSync(filename, (await win.webContents.capturePage()).toPNG());
+        if (result.timingIntegrity.valid || attempt === 3) {
+          phases.push({ ...result, attempt, interruptedAttempts, frames, settledFilename: filename }); break;
+        }
+        interruptedAttempts.push(result);
+      }
+    }
+    const collisionPhases = phases.filter(phase => phase.collision);
+    const positions = collisionPhases.map(phase => phase.after.playerPosition);
+    const deterministicCollision = Math.hypot(positions[0].x - positions[1].x, positions[0].z - positions[1].z) < .0001 &&
+      positions.every(position => Math.abs(position.x - 2.75) < .0001 && Math.abs(position.z - 1.65) < .0001);
+    const collisionCameraMargin = collisionPhases.every(phase => phase.telemetry.every(sample =>
+      sample.cameraPosition.x <= 2.775 && sample.playerPosition.x <= 2.750001));
+    const fixedResolution = lensViews.every(view => view.fixedResolution && view.before.drawingBufferWidth === initial.snapshot.drawingBufferWidth &&
+      view.before.drawingBufferHeight === initial.snapshot.drawingBufferHeight);
+    const lensVerified = lensViews.every(view => view.before.cameraFov === 76 && view.before.cameraNear === .045 &&
+      view.before.bodycamLens.enabled === view.enabled && view.after.bodycamLens.enabled === view.enabled &&
+      view.timingIntegrity.valid && view.poseVerified && (!view.gpu.available || view.gpu.samples > 4));
+    const firstPersonInspection = await win.webContents.executeJavaScript(INSPECT_FIRST_PERSON);
+    const passed = fixedResolution && lensVerified && deterministicCollision && collisionCameraMargin && firstPersonInspection.passed &&
+      phases.every(phase => phase.passed) && captures.every(capture => !capture.snapshot.paused && capture.snapshot.renderStats.points === 0) &&
+      !ERRORS.some(error => error.kind !== 'console-warning');
+    writeResult({ success: passed, test: 'bodycam-lens-motion-settling-collision', initial, atmosphere, captures,
+      lensViews, phases, fixedResolution, lensVerified, deterministicCollision, collisionCameraMargin, firstPersonInspection, errors: ERRORS });
+    app.exit(passed ? 0 : 1);
+  } catch (error) {
+    writeResult({ success: false, test: 'bodycam-lens-motion-settling-collision', message: String(error), errors: ERRORS }); app.exit(1);
   }
 }
 
@@ -812,7 +890,8 @@ function createWindow() {
       await win.webContents.executeJavaScript(INSTALL_DIAGNOSTIC_INPUT_GUARD);
       win.setTitle('Quarto 01 — Teste automático');
     }
-    if (CHAIR_BENCHMARK) runChairBenchmark(win);
+    if (BODYCAM_BENCHMARK) runBodycamBenchmark(win);
+    else if (CHAIR_BENCHMARK) runChairBenchmark(win);
     else if (STORM_BENCHMARK) runStormBenchmark(win);
     else if (AUDIO_PROBE) runAudioProbe(win);
     else if (WEATHER_BENCHMARK) runWeatherBenchmark(win);

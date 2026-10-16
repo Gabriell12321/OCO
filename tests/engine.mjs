@@ -65,11 +65,20 @@ const pipeline = createRenderPipeline(renderer);
 pipeline.resize(960, 540, 'performance');
 assert.equal(pipeline.snapshot().renderPath, 'hdr-output-fxaa');
 assert.equal(pipeline.snapshot().renderTargetSamples, 0);
+assert.equal(pipeline.snapshot().bodycamLens.enabled, true);
+assert.equal(pipeline.snapshot().bodycamLens.extraPasses, 0);
+assert.equal(pipeline.snapshot().colorPasses, 3, 'The lens reuses the existing HDR output pass');
+pipeline.setBodycamEnabled(false);
+pipeline.resize(1280, 720, 'balanced');
+assert.equal(pipeline.snapshot().bodycamLens.enabled, false, 'Resizing preserves the diagnostic lens switch');
+pipeline.setBodycamEnabled(true);
+assert.equal(pipeline.snapshot().bodycamLens.enabled, true);
 pipeline.resize(1280, 720, 'balanced'); pipeline.dispose();
 assert.equal(pipeline.snapshot().postprocessing, false, 'Disposed render targets are not reused');
 const diagnostic = createRenderPipeline(renderer, { fxaa: false });
 diagnostic.resize(1600, 900, 'quality'); assert.equal(diagnostic.snapshot().renderTargetSamples, 4);
 diagnostic.resize(960, 540, 'performance'); assert.equal(diagnostic.snapshot().renderPath, 'direct');
+assert.equal(diagnostic.snapshot().bodycamLens.enabled, false, 'The diagnostic direct path reports no lens');
 diagnostic.dispose();
 console.log(JSON.stringify({ indexedSpatialBatches: stats, transforms: 'preserved',
   triangleCount: triangles, adaptiveResolution: 'overload / recovery / floor / benchmark lock OK',

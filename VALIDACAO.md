@@ -1,4 +1,111 @@
-# Validação da versão 0.10.0
+# Validação da versão 0.11.0
+
+Esta versão altera a altura, o campo de visão e o movimento da câmera.
+A referência 0.10.0 foi preservada localmente com seus 431 arquivos do
+aplicativo conferidos por SHA256, antes de gerar o novo portátil.
+
+## Controle e lente
+
+As quatorze verificações locais passaram. O novo teste de câmera corporal
+compara o mesmo roteiro a 30, 60 e 120 Hz: passada, corrida, mudança de
+direção, mouse e parada produziram diferença máxima zero nas amostras.
+O teste também cobre colisão, parada, pausa, blur, visibilidade, reset,
+valores finitos e limites de deslocamento/rotação. A verificação da cena
+usou 135 raios no campo próximo em cinco posições, com offsets maiores
+que os permitidos pelo controle, sem interseções até 10 cm da câmera.
+
+A altura neutra é 1,45 m. Os limites adicionais são 34 mm verticalmente,
+25 mm horizontalmente, 0,038 rad de roll, 0,026 rad de pitch e 0,0108 rad
+de yaw. No roteiro unitário, a caminhada apresentou 36,28 mm de movimento
+vertical pico a pico; a corrida, 46,08 mm. O roll pico a pico foi de 1,32°
+e 1,75°, respectivamente. Esses valores descrevem a movimentação da câmera,
+não o tempo de renderização.
+
+O FOV de projeção é 76° antes da lente. O remapeamento radial recorta parte
+do campo; no aspecto da janela usada, a seção vertical central equivale
+a aproximadamente 69°. A revisão independente amostrou 40.401 pontos por
+aspecto em sete proporções entre 9:16 e 32:9: UVs e canais de cor dentro
+de [0,1], sem NaN, com derivada radial positiva. AgX/sRGB continuam
+aplicados uma única vez e FXAA vem depois da lente. O pipeline mantém
+três passes de cor e os mesmos alvos de imagem.
+
+## Resultados nativos 0.11.0
+
+Aplicativo Windows na Intel Iris Xe (D3D11/ANGLE), janela de 1900 × 977,
+perfil Desempenho com FXAA e resolução interna fixa de 1004 × 516. Os pares
+abaixo usam a mesma câmera, FOV, geometria e atmosfera congelada, por quatro
+segundos após aquecimento. Só o uniform da lente muda.
+
+| Vista | Lente | FPS | Quadro p95 | GPU média | Draw calls |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Frente | Desligada | 60,19 | 17,1 ms | 13,73 ms | 101 |
+| Frente | Ligada | 60,01 | 17,0 ms | 13,30 ms | 101 |
+| Cama | Desligada | 60,08 | 16,9 ms | 13,50 ms | 95 |
+| Cama | Ligada | 59,79 | 17,0 ms | 13,23 ms | 95 |
+
+Os pares mantiveram 128.890 e 126.100 triângulos, respectivamente, três
+passes de cor, resolução fixa e cobertura temporal válida. Não houve
+repetições, erros ou avisos. A diferença de GPU dessas amostras curtas
+não estabelece ganho de desempenho causado pela lente; seu custo ficou
+dentro da variação observada. A comparação isola a lente no mesmo FOV,
+não o custo de ampliar o campo de visão em relação à versão 0.10.0.
+
+O teste nativo de movimento da câmera confirmou os limites, a resposta
+imediata do mouse e a parada completa. A caminhada teve 31,44 mm de
+oscilação vertical e 1,07° de roll pico a pico; a corrida teve 45,50 mm
+e 1,59°. As velocidades máximas observadas foram de 1,112 e 1,776 m/s.
+Após a parada, os offsets se assentaram em zero. Duas aproximações da
+parede terminaram na mesma posição [2,75; 1,65], sem gerar novos passos
+nos últimos 800 ms de bloqueio. Todas as cinco fases passaram sem retries.
+
+Foram inspecionadas as vistas da frente, cama, parede e para baixo, os
+pares de lente e quadros da caminhada/corrida/mouse. O centro permanece
+legível, as bordas ficam preenchidas, a interface não é deformada e a
+câmera não atravessa móveis nessas vistas. As sequências e telemetria
+confirmam o movimento; capturas isoladas não medem fluidez. A mira foi
+retirada da apresentação e nenhuma arma foi adicionada.
+
+O percurso aceito soma 35,05 segundos e 2.100 quadros com chuva, áudio e
+trovão ativos. Todas as fases mantiveram 1004 × 516, sem redução de escala.
+
+| Medição | FPS | Quadro médio | p95 | p99 | CPU média |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Percurso completo 0.11.0 | 59,92 | 16,70 ms | 16,9 ms | 17,1 ms | 4,12 ms |
+| Trechos em movimento 0.11.0 | 59,87 | 16,71 ms | 16,9 ms | 17,2 ms | 4,24 ms |
+| Trechos em movimento 0.10.0 | 59,36 | 16,85 ms | 16,9 ms | 33,1 ms | 3,35 ms |
+
+Os trechos em movimento somam 25,04 segundos. Caminhar e olhar registrou
+60,03 FPS; correr e olhar, 59,64 FPS. A CPU média em movimento aumentou
+0,89 ms em relação à referência. A altura, o FOV e a dinâmica da câmera
+mudaram, portanto essa comparação informa o resultado global da versão;
+não isola o custo do controlador nem demonstra ganho de FPS. O par de
+lente acima mantém essas variáveis fixas para avaliar apenas a óptica.
+Os números não garantem o mesmo desempenho em outros perfis ou máquinas.
+
+A primeira execução longa foi invalidada por perda de foco da janela.
+Na nova execução, uma tentativa da fase parada também perdeu foco e foi
+descartada/repetida pelo guard. As cinco fases aceitas têm cobertura
+temporal íntegra; as amostras interrompidas não entram nas médias.
+Esses eventos estão preservados nos relatórios locais. Não houve erros
+ou avisos de renderização na rodada válida.
+
+A regressão da sombra humana passou nos pares ON/OFF e em movimento,
+com defasagem máxima observada de 18,8 mm. Cabeça e pés foram inspecionados
+sem regressão visual. Áudio e tempestade reais foram confirmados.
+O teste funcional Desempenho → Equilibrado → Qualidade → Desempenho passou
+sem erros ou avisos, preservando a lente e FOV76 nas resoluções 1004 × 516,
+1338 × 688 e 1582 × 812. Essa troca não mede FPS estabilizado dos três perfis.
+
+Evidências locais, geradas pelo aplicativo e mantidas fora do Git:
+
+- `desktop/results/v0.10.0-bodycam-baseline/`: percurso da versão preservada.
+- `desktop/results/v0.11.0-bodycam-first/`: fonte final com manifesto de
+  432 arquivos, pares de lente, movimento, colisão e capturas aprovadas.
+- `desktop/results/v0.11.0-movement-final/`: tentativa longa invalidada.
+- `desktop/results/v0.11.0-movement-retry/`: percurso válido e regressões.
+- `desktop/results/v0.11.0-smoke-final/`: troca dos três perfis gráficos.
+
+## Referência da versão 0.10.0
 
 O foco desta versão é a cadeira da escrivaninha. A comparação usa o
 aplicativo 0.9.0 preservado antes da alteração, com três poses diagnósticas

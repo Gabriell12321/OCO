@@ -1,6 +1,6 @@
 # Quarto 01 para Windows
 
-Versão 0.10.0, exclusivamente em primeira pessoa. Empacotamento portátil com
+Versão 0.11.0, exclusivamente em primeira pessoa. Empacotamento portátil com
 Electron oficial 44.7.2 para Windows x64. O usuário
 abre `Quarto 01.exe`; Node, navegador, instalação e internet não são necessários.
 
@@ -63,6 +63,13 @@ Essas opções são comparações técnicas; a execução normal usa FXAA nos tr
 `--quality-steady-probe` separa a primeira ativação do perfil QUALIDADE de uma
 amostra de 3 segundos já estabilizada, depois verifica a volta a DESEMPENHO.
 `--smoke-profile-cycle` valida a troca dos três perfis e o retorno a DESEMPENHO.
+`--benchmark-bodycam` captura quatro vistas e compara lente ligada/desligada
+no mesmo FOV de 76 graus e na mesma resolução interna. Um percurso visual
+separado registra altura, deslocamentos, inclinação e passada por quadro,
+com séries de PNGs andando, correndo e girando o mouse. Ele exige assentamento
+após soltar as teclas, resposta imediata ao mouse, colisão repetível e ausência
+de novos passos enquanto o jogador empurra a parede. Essas capturas não são
+usadas como medição de FPS; o percurso de 35 segundos mede a fluidez.
 `--capture-views-only` compara a sombra ligada e desligada na mesma câmera,
 na parede e nos três lados da cama. O teste também anda para frente e para
 trás ao lado da cama, mede a distância entre jogador e projeção, retorna à
