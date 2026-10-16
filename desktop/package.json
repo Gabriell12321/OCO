@@ -1,7 +1,7 @@
 {
   "name": "quarto-01-desktop",
   "productName": "Quarto 01",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Quarto 01 — quarto realista em primeira pessoa para Windows",
   "main": "main.cjs",
   "private": true,

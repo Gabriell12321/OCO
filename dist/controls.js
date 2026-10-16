@@ -1,6 +1,6 @@
 ﻿import * as THREE from 'three';
 
-/** Metre-scaled first-person walking, with fixed eye height and no camera sway. */
+/** Metre-scaled first-person walking with a distance-driven, restrained human gait. */
 export function createControls(camera, canvas, colliders = [], avatar = null, scene = null) {
   const spawn = new THREE.Vector3(1.5, 0, 1.2);
   const position = spawn.clone();
@@ -12,8 +12,15 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
   const pressed = code => keyboard.has(code) || touchKeys.has(code);
   const movementCodes = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
   const radius = .22;
+  const eyeHeight = 1.62, walkSpeed = 1.12, runSpeed = 1.82;
+  const minPitch = -1.42, maxPitch = 1.15;
+  // One phase is a complete left/right stride. This shared clock drives both
+  // the camera and the shadow: pushing against furniture cannot walk in place.
+  const gait = { phase: 0, blend: 0, strideLength: 1.24, speed: 0, localX: 0, localZ: 0, runBlend: 0 };
+  let swayX = 0, swayY = 0, swayRoll = 0;
   const cameraInputPosition = new THREE.Vector3(Infinity, Infinity, Infinity);
   let cameraInputYaw = NaN, cameraInputPitch = NaN;
+  let cameraInputSwayX = NaN, cameraInputSwayY = NaN, cameraInputRoll = NaN;
   const previousPosition = new THREE.Vector3(Infinity, Infinity, Infinity);
   const previousCamera = new THREE.Vector3(Infinity, Infinity, Infinity);
   const previousQuaternion = new THREE.Quaternion();
@@ -39,12 +46,15 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
     const pointer = dragPointer; dragPointer = null;
     if (pointer !== null && canvas.hasPointerCapture?.(pointer)) canvas.releasePointerCapture(pointer);
     moving = false; running = false; speed = 0;
+    gait.phase = 0; gait.blend = 0; gait.strideLength = 1.24;
+    gait.speed = 0; gait.localX = 0; gait.localZ = 0; gait.runBlend = 0;
+    swayX = 0; swayY = 0; swayRoll = 0;
     updateExploring();
   }
 
   function applyLook(dx, dy, sensitivity = .0022) {
     yaw -= dx * sensitivity;
-    pitch = THREE.MathUtils.clamp(pitch - dy * sensitivity, -1.15, 1.15);
+    pitch = THREE.MathUtils.clamp(pitch - dy * sensitivity, minPitch, maxPitch);
   }
 
   function requestMouseLook() {
@@ -118,12 +128,47 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
   }
 
   function updateCamera() {
-    if (position.equals(cameraInputPosition) && yaw === cameraInputYaw && pitch === cameraInputPitch) return;
+    if (position.equals(cameraInputPosition) && yaw === cameraInputYaw && pitch === cameraInputPitch &&
+        swayX === cameraInputSwayX && swayY === cameraInputSwayY && swayRoll === cameraInputRoll) return;
     cameraInputPosition.copy(position); cameraInputYaw = yaw;
     cameraInputPitch = pitch;
-    orientation.set(pitch, yaw, 0, 'YXZ');
+    cameraInputSwayX = swayX; cameraInputSwayY = swayY; cameraInputRoll = swayRoll;
+    orientation.set(pitch, yaw, swayRoll, 'YXZ');
     camera.quaternion.setFromEuler(orientation);
-    camera.position.copy(position); camera.position.y = 1.62;
+    camera.position.copy(position);
+    camera.position.x += Math.cos(yaw) * swayX;
+    camera.position.z -= Math.sin(yaw) * swayX;
+    camera.position.y = eyeHeight + swayY;
+  }
+
+  function updateGait(dt, dx, dz) {
+    const distance = Math.hypot(dx, dz);
+    gait.speed = speed;
+    gait.runBlend = THREE.MathUtils.damp(gait.runBlend, running ? 1 : 0, 7, dt);
+    gait.strideLength = THREE.MathUtils.lerp(1.24, 1.58, gait.runBlend);
+    if (distance > 1e-8) {
+      gait.phase = (gait.phase + distance / gait.strideLength * Math.PI * 2) % (Math.PI * 2);
+      gait.localX = (Math.cos(yaw) * dx - Math.sin(yaw) * dz) / distance;
+      gait.localZ = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / distance;
+    } else {
+      gait.localX = 0; gait.localZ = 0;
+    }
+    const targetBlend = moving ? Math.min(1, speed / walkSpeed) : 0;
+    gait.blend = THREE.MathUtils.damp(gait.blend, targetBlend, moving ? 9 : 14, dt);
+    if (!moving && gait.blend < .0001) gait.blend = 0;
+    if (!running && gait.runBlend < .0001) gait.runBlend = 0;
+    const amplitude = gait.blend * THREE.MathUtils.lerp(1, 1.35, gait.runBlend);
+    // Pelvis/eye stabilization leaves only millimetres of lateral sway and
+    // about a centimetre of vertical travel. No continuous idle bobbing.
+    const vertical = (.010 * Math.cos(gait.phase * 2) - .002 * Math.cos(gait.phase * 4)) * amplitude;
+    const lateral = .006 * Math.sin(gait.phase) * amplitude;
+    const roll = -.0011 * Math.sin(gait.phase) * amplitude;
+    swayX = THREE.MathUtils.damp(swayX, lateral, 16, dt);
+    swayY = THREE.MathUtils.damp(swayY, vertical, 16, dt);
+    swayRoll = THREE.MathUtils.damp(swayRoll, roll, 16, dt);
+    if (!gait.blend && Math.abs(swayX) < .00001 && Math.abs(swayY) < .00001 && Math.abs(swayRoll) < .00001) {
+      swayX = 0; swayY = 0; swayRoll = 0;
+    }
   }
 
   function reset() {
@@ -139,10 +184,14 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
     const localZ = Number(pressed('KeyS') || pressed('ArrowDown')) - Number(pressed('KeyW') || pressed('ArrowUp'));
     const inputLength = Math.hypot(localX, localZ) || 1;
     const requestedRun = pressed('ShiftLeft') || pressed('ShiftRight');
-    const targetSpeed = requestedRun ? 1.72 : 1.04;
-    const x = localX / inputLength * targetSpeed, z = localZ / inputLength * targetSpeed;
-    velocity.x = THREE.MathUtils.damp(velocity.x, Math.cos(yaw) * x + Math.sin(yaw) * z, 15, dt);
-    velocity.y = THREE.MathUtils.damp(velocity.y, -Math.sin(yaw) * x + Math.cos(yaw) * z, 15, dt);
+    const targetSpeed = requestedRun ? runSpeed : walkSpeed;
+    const x = localX / inputLength * targetSpeed * .88;
+    const z = localZ / inputLength * targetSpeed * (localZ > 0 ? .82 : 1);
+    // A short weight transfer starts a step; braking settles sooner than
+    // acceleration. Velocity remains in world space for gentle direction changes.
+    const response = localX || localZ ? 8 : 12;
+    velocity.x = THREE.MathUtils.damp(velocity.x, Math.cos(yaw) * x + Math.sin(yaw) * z, response, dt);
+    velocity.y = THREE.MathUtils.damp(velocity.y, -Math.sin(yaw) * x + Math.cos(yaw) * z, response, dt);
     if (!localX && !localZ && velocity.lengthSq() < .0002) velocity.set(0, 0);
     const oldX = position.x, oldZ = position.z;
     const steps = velocity.lengthSq() > 0 && dt > 0 ? Math.max(1, Math.ceil(velocity.length() * dt / .055)) : 0;
@@ -158,6 +207,7 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
     speed = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
     moving = speed > .025; running = requestedRun && moving;
     if (moving) direction.set(dx, 0, dz).normalize();
+    updateGait(dt, dx, dz);
     updateCamera();
     changed = position.distanceToSquared(previousPosition) > 1e-10 ||
       camera.position.distanceToSquared(previousCamera) > 1e-10 ||
@@ -182,7 +232,7 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
     if (![x, z, pose?.yaw, pose?.pitch].every(Number.isFinite)) return false;
     if (x < -2.75 || x > 2.75 || z < -2.9 || z > 2.9 || collides(x, z)) return false;
     clearInput(); position.set(x, 0, z); yaw = pose.yaw;
-    pitch = THREE.MathUtils.clamp(pose.pitch, -1.15, 1.15);
+    pitch = THREE.MathUtils.clamp(pose.pitch, minPitch, maxPitch);
     direction.set(-Math.sin(yaw), 0, -Math.cos(yaw));
     updateCamera(); return true;
   }
@@ -191,6 +241,7 @@ export function createControls(camera, canvas, colliders = [], avatar = null, sc
   return {
     update, reset, dispose, diagnosticLook, setDiagnosticPose,
     get moving() { return moving; }, get running() { return running; }, get speed() { return speed; },
+    get gait() { return gait; },
     get mode() { return 'first-person'; },
     get yaw() { return yaw; }, get pitch() { return pitch; },
     get changed() { return changed; }, get position() { return position; }, get direction() { return direction; }

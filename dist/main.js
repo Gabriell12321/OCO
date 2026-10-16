@@ -3,6 +3,7 @@ import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { FXAAPass } from 'three/addons/postprocessing/FXAAPass.js';
 import { createMaterials } from './materials.js';
 import { createRoom } from './room.js';
 import { createControls } from './controls.js';
@@ -18,7 +19,9 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const monitor = new PerformanceMonitor();
 let renderer, controls, room, scene, camera, frameHandle = 0;
 let playerShadow, gpuTimer;
-let qualityTarget = null, outputPass = null;
+let qualityTarget = null, outputPass = null, displayTarget = null, fxaaPass = null;
+const diagnosticQuery = Boolean(window.desktopDiagnostics) ? new URLSearchParams(location.search) : new URLSearchParams();
+const useFXAA = diagnosticQuery.get('fxaa') !== '0';
 let quality = 'performance', ready = false, desktopPaused = false;
 let adaptiveScale = 1, lowWindows = 0, highWindows = 0;
 let previousTick = 0, previousRender = 0, accumulator = 0, elapsed = 0;
@@ -136,8 +139,8 @@ function simplifyMaterials() {
         // A transmitting shade triggers another full-scene render. Keep its
         // cloth normal map and use gentle emitted light for the warm fabric.
         material.transmission = 0; material.emissive?.set('#e9c697');
-        material.emissiveMap = material.map;
-        material.emissiveIntensity = 2.4; material.needsUpdate = true;
+        material.emissiveMap = material.userData.lampEmission || material.map;
+        material.emissiveIntensity = 1.25; material.needsUpdate = true;
       }
       for (const value of Object.values(material)) {
         if (value?.isTexture && value.anisotropy > 4) {
@@ -170,17 +173,17 @@ function addLighting() {
   lamp.position.copy(room.lampPosition); lamp.castShadow = true;
   lamp.shadow.mapSize.set(512, 512);
   lamp.shadow.camera.near = .04; lamp.shadow.camera.far = 8;
-  lamp.shadow.normalBias = .006; lamp.shadow.bias = -.00012; lamp.shadow.radius = 3;
+  lamp.shadow.normalBias = .006; lamp.shadow.bias = -.00012; lamp.shadow.radius = 4.2;
   scene.add(lamp);
   shadowLights.push(moon, lamp);
   const bounce = new THREE.RectAreaLight(0xffd9b1, .55, .65, .45);
   bounce.position.copy(room.lampPosition).add(new THREE.Vector3(.05, .65, -.25));
   bounce.lookAt(-.4, 2.8, -1.8); scene.add(bounce);
   lightingProfiles.full.push(bounce);
-  const lampFill = new THREE.PointLight(0xffd9b1, .28, 4.5, 2);
+  const lampFill = new THREE.PointLight(0xffd9b1, .40, 4.5, 2);
   lampFill.position.copy(bounce.position); scene.add(lampFill);
   lightingProfiles.efficient.push(lampFill);
-  const coolBounce = new THREE.PointLight(0xa6b9c6, .35, 6, 2);
+  const coolBounce = new THREE.PointLight(0xa6b9c6, .42, 6, 2);
   coolBounce.position.set(1.1, 1.9, -.3); scene.add(coolBounce);
 }
 
@@ -209,31 +212,43 @@ function resizeDrawingBuffer() {
   const { width, height } = drawingSize(innerWidth, innerHeight, devicePixelRatio, quality, adaptiveScale);
   renderer.setPixelRatio(1); renderer.setSize(width, height, false);
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  if (quality === 'quality') {
+  if (useFXAA || quality === 'quality') {
     if (!qualityTarget) {
-      // This allocation belongs only to the quality profile. Its scene stays
-      // linear HDR; OutputPass applies AgX and sRGB exactly once after resolve.
+      // Tone mapping must precede FXAA: its edge detector expects display
+      // luminance. Keep the room linear HDR until OutputPass, with no MSAA.
       qualityTarget = new THREE.WebGLRenderTarget(width, height, {
-        type: THREE.HalfFloatType, samples: Math.min(4, renderer.capabilities.maxSamples),
+        type: THREE.HalfFloatType, samples: useFXAA ? 0 : Math.min(4, renderer.capabilities.maxSamples),
         minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
         depthBuffer: true, stencilBuffer: false, generateMipmaps: false,
       });
-      qualityTarget.texture.name = 'Quality HDR multisample resolve';
+      qualityTarget.texture.name = useFXAA ? 'Room linear HDR before tone mapping' : 'Quality HDR multisample resolve';
       qualityTarget.texture.colorSpace = THREE.LinearSRGBColorSpace;
-      outputPass = new OutputPass(); outputPass.renderToScreen = true;
+      outputPass = new OutputPass(); outputPass.renderToScreen = !useFXAA;
+      if (useFXAA) {
+        displayTarget = new THREE.WebGLRenderTarget(width, height, {
+          type: THREE.UnsignedByteType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+          depthBuffer: false, stencilBuffer: false, generateMipmaps: false,
+        });
+        // OutputPass writes sRGB-encoded values here. NoColorSpace prevents
+        // the next texture fetch from silently decoding them back to linear.
+        displayTarget.texture.name = 'Display luminance for FXAA';
+        displayTarget.texture.colorSpace = THREE.NoColorSpace;
+        fxaaPass = new FXAAPass(); fxaaPass.renderToScreen = true;
+      }
     } else qualityTarget.setSize(width, height);
+    displayTarget?.setSize(width, height); fxaaPass?.setSize(width, height);
   } else if (qualityTarget) {
     renderer.setRenderTarget(null);
-    qualityTarget.dispose(); outputPass.dispose(); qualityTarget = outputPass = null;
+    qualityTarget.dispose(); outputPass.dispose(); displayTarget?.dispose(); fxaaPass?.dispose();
+    qualityTarget = outputPass = displayTarget = fxaaPass = null;
   }
 }
 
 function renderRoom() {
   if (qualityTarget) {
     renderer.setRenderTarget(qualityTarget); renderer.render(scene, camera);
-    // Changing the target resolves its multisampled color buffer. No composer,
-    // AO, bloom or other fullscreen work is present in either faster profile.
-    outputPass.render(renderer, null, qualityTarget);
+    outputPass.render(renderer, displayTarget, qualityTarget);
+    if (fxaaPass) fxaaPass.render(renderer, null, displayTarget);
   } else {
     renderer.setRenderTarget(null); renderer.render(scene, camera);
   }
@@ -273,15 +288,16 @@ function getPerformanceSnapshot() {
   const stats = monitor.snapshot();
   const width = renderer?.domElement.width || 0, height = renderer?.domElement.height || 0;
   return {
-    ...stats, version: '0.5.0', ready, quality, qualityLabel: PROFILES[quality].label,
+    ...stats, version: '0.6.0', ready, quality, qualityLabel: PROFILES[quality].label,
     character: false, firstPersonOnly: true,
     renderer: 'WebGL2', pathTracing: false, postprocessing: Boolean(qualityTarget), shadows: 'cached',
     gpuRenderer, gpuVendor, msaaSamples: qualityTarget ? qualityTarget.samples : msaaSamples,
     contextMsaaSamples: msaaSamples,
     renderTargetSamples: qualityTarget?.samples || 0,
-    renderPath: qualityTarget ? 'hdr-msaa-output' : 'direct',
-    colorPasses: qualityTarget ? 2 : 1,
-    resolve: qualityTarget ? 'hardware-msaa' : 'none',
+    renderPath: fxaaPass ? 'hdr-output-fxaa' : qualityTarget ? 'hdr-msaa-output' : 'direct',
+    colorPasses: fxaaPass ? 3 : qualityTarget ? 2 : 1,
+    antialiasing: fxaaPass ? 'fxaa' : (qualityTarget?.samples || msaaSamples) > 0 ? 'msaa' : 'none',
+    resolve: fxaaPass ? 'fxaa-after-tone-mapping' : qualityTarget ? 'hardware-msaa' : 'none',
     gpuTiming: gpuTimer?.snapshot() || null,
     playerShadow: playerShadow?.snapshot() || { active: false },
     shadowFilter: quality === 'quality' ? 'full-pcf' : 'four-tap-soft',
@@ -294,6 +310,7 @@ function getPerformanceSnapshot() {
     cameraPosition: camera ? { x: camera.position.x, y: camera.position.y, z: camera.position.z } : null,
     cameraQuaternion: camera ? camera.quaternion.toArray() : null,
     cameraYaw: controls?.yaw || 0, cameraPitch: controls?.pitch || 0,
+    gait: controls?.gait ? { ...controls.gait } : null,
     view: 'first-person', moving: controls?.moving || false, running: controls?.running || false,
     staticSceneMatrices: 'cached',
     textures: renderer?.info.memory.textures || 0, geometries: renderer?.info.memory.geometries || 0,
@@ -356,7 +373,7 @@ function frame(now) {
 }
 
 window.Quarto01 = {
-  version: '0.5.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
+  version: '0.6.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
   get ready() { return ready; }, get quality() { return quality; }, get fps() { return monitor.fps; },
   get frameTimes() { return monitor.frameTimes.slice(); },
   get renderStats() { return renderer ? { ...renderer.info.render } : {}; },
@@ -372,6 +389,8 @@ function setDiagnosticView(id) {
   const poses = {
     initial: { position: [1.5, 1.2], yaw: .6868176498, pitch: -.12 },
     shadow: { position: [1.5, -1.6], yaw: -2.299, pitch: 0 },
+    feet: { position: [.7, -.8], yaw: -2.975, pitch: -1.38 },
+    'feet-oblique': { position: [.7, -.8], yaw: -2.475, pitch: -1.38 },
     blanket: { position: [.85, .3], yaw: .77, pitch: -.4 },
   };
   if (!poses[id] || !controls.setDiagnosticPose(poses[id])) return false;
@@ -380,9 +399,8 @@ function setDiagnosticView(id) {
 }
 
 async function init() {
-  // Normal launches use the measured faster direct path. Desktop A/B can still
-  // request the original 4x default framebuffer using ?msaa=4.
-  const diagnosticMSAA4 = Boolean(window.desktopDiagnostics) && new URLSearchParams(location.search).get('msaa') === '4';
+  // Desktop A/B can compare the same scene with ?fxaa=0 and optionally msaa=4.
+  const diagnosticMSAA4 = !useFXAA && diagnosticQuery.get('msaa') === '4';
   renderer = new THREE.WebGLRenderer({ canvas, antialias: diagnosticMSAA4, powerPreference: 'high-performance', alpha: false });
   const gl = renderer.getContext(), debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
   gpuRenderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
@@ -396,7 +414,7 @@ async function init() {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   scene = new THREE.Scene(); scene.background = new THREE.Color('#293e4d');
   scene.fog = new THREE.FogExp2(0x20272c, .007);
-  camera = new THREE.PerspectiveCamera(66, innerWidth / innerHeight, .045, 45);
+  camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, .045, 45);
   camera.position.set(2.15, 1.62, 2.55); camera.lookAt(-.55, 1.2, -1.3);
   setQuality('performance');
   const [materials, environment] = await Promise.all([

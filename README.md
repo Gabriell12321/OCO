@@ -1,12 +1,14 @@
 # Quarto 01
 
-Um único quarto 3D de terror psicológico, explorado exclusivamente em primeira pessoa: materiais PBR fotográficos, superfícies envelhecidas, luz noturna fria, abajur quente e tecidos com dobras. O cobertor tem uma malha detalhada, com caimento arredondado, bainhas e dobras assimétricas. A sombra articulada do jogador acompanha os movimentos, projetada pela luz do abajur sobre o quarto.
+Um único quarto 3D de terror psicológico, explorado exclusivamente em primeira pessoa: materiais PBR fotográficos, superfícies envelhecidas, luz noturna fria, abajur quente e tecidos com dobras. O cobertor tem caimento arredondado, bainhas e dobras assimétricas. A sombra do jogador usa uma malha humana com pés, mãos e animação esquelética, projetada pela luz do abajur sobre o quarto.
 
 [Baixar a versão Windows](https://github.com/Gabriell12321/OCO/releases/latest). Extraia o ZIP completo e abra `Quarto 01.exe`.
 
 Versão Windows portátil: abra `Windows/Quarto 01/Quarto 01.exe`, na pasta acima deste projeto. Extraia o ZIP inteiro antes de abrir e mantenha o executável junto das demais pastas e arquivos. Node, navegador e conexão à internet não são necessários para usar o programa.
 
-A versão desktop reutiliza as sombras estáticas, controla a resolução interna e limita a apresentação a 60 quadros por segundo. Os perfis **Desempenho** e **Equilibrado** usam renderização direta para priorizar a fluidez; **Qualidade** aumenta a resolução e suaviza as bordas com MSAA 4×. É possível trocar de perfil durante o jogo. O perfil inicial é Desempenho, com resolução adaptativa. A câmera fica na altura dos olhos e a caminhada respeita as colisões dos móveis. O tratamento de cor AgX preserva a transição entre a luz do abajur e as sombras do quarto.
+A versão desktop reutiliza as sombras estáticas, controla a resolução interna e limita a apresentação a 60 quadros por segundo. Os perfis **Desempenho**, **Equilibrado** e **Qualidade** permitem trocar a qualidade durante o jogo. O perfil inicial é Desempenho, com resolução adaptativa. O tratamento de cor AgX preserva a transição entre a luz do abajur e as sombras do quarto; FXAA suaviza as bordas depois desse tratamento, sem o custo de MSAA 4×. Veja as medições em [VALIDACAO.md](VALIDACAO.md).
+
+A caminhada acelera e freia suavemente. A passada acompanha a distância realmente percorrida, com deslocamento discreto da câmera na altura dos olhos; ao parar ou encostar em um móvel, os passos cessam. O campo de visão mais contido evita a distorção excessiva de grande-angular. Verniz gasto, tecido iluminado do abajur e preenchimento nas sombras dão mais leitura aos materiais.
 
 O atalho `ABRIR QUARTO.cmd`, na pasta acima, também abre o aplicativo Windows. Para desenvolvimento, `npm start` continua disponível nesta pasta.
 

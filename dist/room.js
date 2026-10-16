@@ -270,6 +270,7 @@ export function createRoom(scene, materials) {
     side: THREE.DoubleSide, sheen: .35, sheenRoughness: .95,
     emissive: '#d19b61', emissiveIntensity: .055,
   });
+  shade.userData.lampEmission = lampEmissionTexture(M.linen.map?.image);
   const shadeGeo = new THREE.CylinderGeometry(.15, .225, .29, 144, 12, true);
   const shadeP = shadeGeo.attributes.position;
   for (let i = 0; i < shadeP.count; i++) {
@@ -724,6 +725,36 @@ function contactTexture() {
   gradient.addColorStop(0, 'rgba(0,0,0,.9)'); gradient.addColorStop(.45, 'rgba(0,0,0,.62)'); gradient.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = gradient; ctx.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
+}
+
+// Precompute the shade's transmitted glow once: the bulb is below the centre,
+// while stitched rims and pleats absorb light. Runtime uses one emissive map.
+function lampEmissionTexture(photographicWeave) {
+  const canvas = document.createElement('canvas'); canvas.width = 768; canvas.height = 384;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, '#5c4932'); gradient.addColorStop(.12, '#a88a5d');
+  gradient.addColorStop(.50, '#e8cea0'); gradient.addColorStop(.77, '#f2dbb1');
+  gradient.addColorStop(.94, '#c8a876'); gradient.addColorStop(1, '#6c5133');
+  ctx.fillStyle = gradient; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (photographicWeave) {
+    ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = .35;
+    ctx.drawImage(photographicWeave, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+  // A complete turn contains the same 48 folds as the actual shade geometry.
+  for (let pleat = 0; pleat < 48; pleat++) {
+    const x = pleat * canvas.width / 48;
+    const fold = ctx.createLinearGradient(x, 0, x + canvas.width / 48, 0);
+    fold.addColorStop(0, 'rgba(48,32,16,.20)');
+    fold.addColorStop(.45, 'rgba(48,32,16,0)');
+    fold.addColorStop(1, 'rgba(48,32,16,.20)');
+    ctx.fillStyle = fold; ctx.fillRect(x, 0, canvas.width / 48, canvas.height);
+  }
+  const map = new THREE.CanvasTexture(canvas);
+  map.name = 'Baked warm linen shade transmission'; map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = THREE.RepeatWrapping; map.anisotropy = 4;
+  return map;
 }
 
 function patternedRug(photographicWeave) {

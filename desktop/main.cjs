@@ -8,7 +8,11 @@ const { buildBenchmarkScript } = require('./benchmark-renderer.cjs');
 
 const NO_MSAA_BENCHMARK = process.argv.includes('--benchmark-no-msaa');
 const FORCE_MSAA4_BENCHMARK = process.argv.includes('--benchmark-msaa4');
-const APP_URL = 'app://quarto/index.html' + (FORCE_MSAA4_BENCHMARK ? '?msaa=4' : NO_MSAA_BENCHMARK ? '?msaa=0' : '');
+const NO_FXAA_BENCHMARK = process.argv.includes('--benchmark-no-fxaa') || process.argv.includes('--fxaa=0') || NO_MSAA_BENCHMARK || FORCE_MSAA4_BENCHMARK;
+const diagnosticQuery = new URLSearchParams();
+if (NO_FXAA_BENCHMARK) diagnosticQuery.set('fxaa', '0');
+if (FORCE_MSAA4_BENCHMARK) diagnosticQuery.set('msaa', '4');
+const APP_URL = 'app://quarto/index.html' + (diagnosticQuery.size ? '?' + diagnosticQuery : '');
 const CONTENT_ROOT = path.resolve(__dirname, 'dist');
 const QUALITY_STEADY_PROBE = process.argv.includes('--quality-steady-probe');
 const SMOKE_PROFILE_CYCLE = process.argv.includes('--smoke-profile-cycle') || QUALITY_STEADY_PROBE;
@@ -99,7 +103,10 @@ function writeResult(result) {
   fs.mkdirSync(RESULTS_DIR, { recursive: true });
   const filename = path.join(RESULTS_DIR, 'latest.json');
   fs.writeFileSync(filename, JSON.stringify(result, null, 2), 'utf8');
-  console.log(JSON.stringify({ benchmarkFile: filename, ...result }));
+  // Full traces belong in the result file, not thousands of console lines.
+  console.log(JSON.stringify({ benchmarkFile: filename, success: result.success,
+    test: result.test || result.metrics?.test, moving: result.metrics?.moving,
+    renderPath: result.metrics?.renderer?.renderPath, errors: result.errors || [] }));
 }
 
 // This test executes only inside our packaged room and never generates system
@@ -196,7 +203,9 @@ async function runShadowCapture(win) {
     const passed = captures[0].snapshot.playerShadow.active && !captures[1].snapshot.playerShadow.active &&
       captures.every(capture => !capture.snapshot.loadingVisible) &&
       cameraUnchanged && darkenedPixels - brightenedPixels > 500 && !ERRORS.some(error => error.kind !== 'console-warning');
-    writeResult({ success: passed, test: 'shadow-on-off-same-camera', captures, difference, errors: ERRORS });
+    const detailCaptures = [];
+    for (const view of ['initial', 'blanket', 'feet', 'feet-oblique']) detailCaptures.push(await captureDiagnosticView(win, view));
+    writeResult({ success: passed, test: 'shadow-on-off-same-camera', captures, detailCaptures, difference, errors: ERRORS });
     app.exit(passed ? 0 : 1);
   } catch (error) {
     writeResult({ success: false, test: 'shadow-on-off-same-camera', message: String(error), errors: ERRORS });
@@ -214,9 +223,9 @@ async function runBenchmark(win) {
     const image = await win.webContents.capturePage();
     fs.writeFileSync(screenshotPath, image.toPNG());
     const captures = [];
-    for (const view of ['shadow', 'blanket']) captures.push(await captureDiagnosticView(win, view));
+    for (const view of ['shadow', 'blanket', 'feet']) captures.push(await captureDiagnosticView(win, view));
     const passed = firstPersonInspection.passed && metrics.movementVerified && metrics.turningVerified &&
-      metrics.runningVerified && metrics.shadowMovementVerified &&
+      metrics.runningVerified && metrics.gaitVerified && metrics.shadowMovementVerified &&
       metrics.renderer.version === app.getVersion() &&
       metrics.startSnapshot.view === 'first-person' && metrics.renderer.view === 'first-person' &&
       !metrics.errorVisible && !metrics.loadingVisible &&
@@ -284,9 +293,11 @@ async function runQualitySmoke(win) {
     }
     const passed = snapshots.every((snapshot, index) => snapshot.quality === qualityOrder[index]) &&
       snapshots.every(snapshot => snapshot.ready && !snapshot.paused && !snapshot.loadingVisible && !snapshot.errorVisible) &&
-      snapshots.every(snapshot => snapshot.contextMsaaSamples === 0 && (snapshot.quality === 'quality'
-        ? snapshot.renderTargetSamples === 4 && snapshot.postprocessing && snapshot.colorPasses === 2
-        : snapshot.renderTargetSamples === 0 && !snapshot.postprocessing && snapshot.colorPasses === 1)) &&
+      snapshots.every(snapshot => snapshot.contextMsaaSamples === 0 && (!NO_FXAA_BENCHMARK
+        ? snapshot.renderTargetSamples === 0 && snapshot.antialiasing === 'fxaa' && snapshot.postprocessing && snapshot.colorPasses === 3
+        : snapshot.quality === 'quality'
+          ? snapshot.renderTargetSamples === 4 && snapshot.postprocessing && snapshot.colorPasses === 2
+          : snapshot.renderTargetSamples === 0 && !snapshot.postprocessing && snapshot.colorPasses === 1)) &&
       (!QUALITY_STEADY_PROBE || snapshots.every(snapshot => snapshot.steadyProbe?.frames > 10)) &&
       firstPersonInspections.every(inspection => inspection.passed) &&
       !ERRORS.some(error => error.kind !== 'console-warning');

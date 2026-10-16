@@ -76,7 +76,7 @@ async function build() {
   const credits = path.join(appRoot, 'CREDITOS');
   fs.mkdirSync(credits, { recursive: true });
   if (firstPersonOnly) removeBuildOutput(path.join(credits, 'CHARACTER.md'));
-  for (const name of firstPersonOnly ? ['ASSETS.md'] : ['ASSETS.md', 'CHARACTER.md']) {
+  for (const name of firstPersonOnly ? ['ASSETS.md', 'SHADOW-ASSET.md'] : ['ASSETS.md', 'CHARACTER.md', 'SHADOW-ASSET.md']) {
     if (fs.existsSync(path.join(projectRoot, name))) fs.copyFileSync(path.join(projectRoot, name), path.join(credits, name));
   }
   fs.writeFileSync(path.join(appRoot, 'build-info.json'), JSON.stringify({

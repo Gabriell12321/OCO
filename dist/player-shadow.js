@@ -1,56 +1,113 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import humanData from './assets/player-shadow/human-data.js';
 
-/** A single, low-polygon articulated caster. It exists only in its own scene. */
+/** A real skinned human, reduced offline for the shadow's resolution.
+ * The figure has continuous anatomy, curved shoes, hands, fingers and clothing.
+ * No textures, GLTF loader or visible third-person body are loaded at runtime.
+ */
 export function createHumanShadowProxy() {
-  const root = new THREE.Bone(), hips = new THREE.Bone(), torso = new THREE.Bone(), head = new THREE.Bone();
-  root.add(hips); hips.position.y = .91; hips.add(torso); torso.position.y = .13;
-  torso.add(head); head.position.y = .51;
-  const bones = [root, hips, torso, head], parts = [];
-  const limbs = { arms: [], legs: [] };
-  function bone(parent, x, y, z = 0) {
-    const value = new THREE.Bone(); value.position.set(x, y, z); parent.add(value); bones.push(value); return value;
+  const model = new THREE.ObjectLoader().parse(humanData.model);
+  const object = new THREE.Group(); object.name = 'Human shadow only'; object.add(model);
+  let mesh;
+  model.traverse(child => { if (child.isSkinnedMesh) mesh = child; });
+  mesh.name = 'Michelle shadow silhouette'; mesh.frustumCulled = false;
+  const mixer = new THREE.AnimationMixer(model);
+  const actions = Object.fromEntries(humanData.clips.map(json => {
+    const clip = THREE.AnimationClip.parse(json);
+    const action = mixer.clipAction(clip).play();
+    action.paused = true;
+    return [clip.name, action];
+  }));
+  const sample = (phase, blend, runBlend) => {
+    const unit = ((phase / (Math.PI * 2)) % 1 + 1) % 1;
+    const motionWeight = blend * THREE.MathUtils.lerp(.8, .85, runBlend);
+    actions.Idle.time = .25;
+    actions.Walk.time = unit * actions.Walk.getClip().duration;
+    actions.Run.time = unit * actions.Run.getClip().duration;
+    actions.Idle.setEffectiveWeight(1 - motionWeight);
+    actions.Walk.setEffectiveWeight(motionWeight * (1 - runBlend));
+    actions.Run.setEffectiveWeight(motionWeight * runBlend);
+    mixer.update(0);
+    object.updateMatrixWorld(true);
+  };
+  sample(0, 0, 0);
+  mesh.computeBoundingBox();
+  const box = mesh.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+  const scale = humanData.metadata.height / (box.max.y - box.min.y);
+  model.scale.multiplyScalar(scale);
+  model.position.y = -box.min.y * scale + .006;
+  const baseY = model.position.y;
+  object.updateMatrixWorld(true);
+
+  // A few sole extremities are enough to prevent the retargeted shoes from
+  // penetrating the floor. This avoids evaluating all 3k skinned vertices.
+  const support = new Set(), point = new THREE.Vector3();
+  const skinIndex = mesh.geometry.attributes.skinIndex;
+  const skinWeight = mesh.geometry.attributes.skinWeight;
+  for (const side of ['Left', 'Right']) {
+    const footBones = new Set(mesh.skeleton.bones.map((bone, i) => ({ bone, i }))
+      .filter(({ bone }) => bone.name.includes(side + 'Foot') || bone.name.includes(side + 'Toe')).map(({ i }) => i));
+    const candidates = [];
+    for (let i = 0; i < skinIndex.count; i++) {
+      let influence = 0;
+      for (let c = 0; c < 4; c++) if (footBones.has(skinIndex.array[i * 4 + c])) influence += skinWeight.array[i * 4 + c];
+      if (influence < .5) continue;
+      mesh.getVertexPosition(i, point).applyMatrix4(mesh.matrixWorld);
+      candidates.push({ index: i, point: point.clone() });
+    }
+    for (const dy of [.35, 1]) for (const dx of [-1, -.5, 0, .5, 1]) for (const dz of [-1, -.5, 0, .5, 1]) {
+      let best = Infinity, index = -1;
+      for (const candidate of candidates) {
+        const value = dy * candidate.point.y + dx * candidate.point.x + dz * candidate.point.z;
+        if (value < best) { best = value; index = candidate.index; }
+      }
+      if (index >= 0) support.add(index);
+    }
   }
-  function part(geometry, joint, x, y, z, sx = 1, sy = 1, sz = 1) {
-    geometry.scale(sx, sy, sz); geometry.translate(x, y, z);
-    const count = geometry.attributes.position.count;
-    const indices = new Uint16Array(count * 4), weights = new Float32Array(count * 4);
-    const index = bones.indexOf(joint);
-    for (let i = 0; i < count; i++) { indices[i * 4] = index; weights[i * 4] = 1; }
-    geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(indices, 4));
-    geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weights, 4));
-    parts.push(geometry);
+  const soleVertices = [...support];
+  let phase = 0, lastPhase = 0, blend = 0, runBlend = 0, yawOffset = 0;
+  let floorCorrection = 0, lowestSole = .006;
+  function update(controls, elapsed) {
+    const gait = controls.gait;
+    blend = gait ? gait.blend : THREE.MathUtils.damp(blend, controls.moving ? 1 : 0, 14, elapsed);
+    runBlend = gait ? gait.runBlend : THREE.MathUtils.damp(runBlend, controls.running ? 1 : 0, 7, elapsed);
+    if (gait) {
+      if (gait.phase === 0 && gait.blend === 0) phase = lastPhase = 0;
+      const advance = THREE.MathUtils.euclideanModulo(gait.phase - lastPhase + Math.PI, Math.PI * 2) - Math.PI;
+      phase += advance * (gait.localZ > .3 ? -1 : 1);
+      lastPhase = gait.phase;
+    } else phase += Math.max(0, controls.speed) * elapsed * Math.PI * 2 / (controls.running ? 1.58 : 1.24);
+    // The upper body follows the view, while a side step turns the pelvis
+    // partway toward its travel direction. Backward steps reverse the clip.
+    const desiredYaw = gait ? -gait.localX * .65 * blend : 0;
+    yawOffset = THREE.MathUtils.damp(yawOffset, desiredYaw, 12, elapsed);
+    object.position.copy(controls.position);
+    object.rotation.y = controls.yaw + Math.PI + yawOffset;
+    model.position.y = baseY;
+    sample(phase, blend, runBlend);
+    let low = Infinity;
+    for (const index of soleVertices) {
+      mesh.getVertexPosition(index, point).applyMatrix4(mesh.matrixWorld);
+      low = Math.min(low, point.y - object.position.y);
+    }
+    // Walking has a support foot; running keeps the recorded flight interval.
+    floorCorrection = THREE.MathUtils.lerp(.006 - low, Math.max(0, .006 - low), runBlend);
+    model.position.y += floorCorrection;
+    lowestSole = low + floorCorrection;
+    object.updateMatrixWorld(true);
   }
-  const round = () => new THREE.SphereGeometry(1, 8, 6);
-  const cylinder = (radius, length) => new THREE.CylinderGeometry(radius, radius * .9, length, 8, 1);
-  part(round(), hips, 0, .94, 0, .19, .18, .12);
-  part(round(), torso, 0, 1.245, 0, .235, .29, .135);
-  part(cylinder(.055, .1), head, 0, 1.515, 0);
-  part(new THREE.SphereGeometry(1, 10, 8), head, 0, 1.64, .005, .108, .14, .115);
-  for (const sign of [-1, 1]) {
-    const shoulder = bone(torso, sign * .258, .39);
-    const elbow = bone(shoulder, 0, -.30), wrist = bone(elbow, 0, -.28);
-    // Rounded deltoids and overlapping capsule ends avoid squared-off upper
-    // arms in the enlarged wall silhouette, without another draw call.
-    part(new THREE.SphereGeometry(1, 8, 4), shoulder, sign * .25, 1.425, 0, .078, .082, .068);
-    part(new THREE.CapsuleGeometry(.055, .23, 2, 8), shoulder, sign * .258, 1.28, 0);
-    part(cylinder(.043, .28), elbow, sign * .258, .99, 0);
-    part(round(), wrist, sign * .258, .795, .01, .041, .075, .027);
-    limbs.arms.push({ shoulder, elbow, sign });
-    const thigh = bone(hips, sign * .112, 0);
-    const knee = bone(thigh, 0, -.42), ankle = bone(knee, 0, -.40);
-    part(cylinder(.077, .42), thigh, sign * .112, .70, 0);
-    part(cylinder(.054, .40), knee, sign * .112, .29, 0);
-    part(new THREE.BoxGeometry(.12, .105, .245), ankle, sign * .112, .055, .06);
-    limbs.legs.push({ thigh, knee, sign });
+  function dispose() {
+    mixer.stopAllAction(); mixer.uncacheRoot(model);
+    mesh.geometry.dispose(); mesh.material.dispose(); mesh.skeleton.dispose();
+    object.removeFromParent();
   }
-  const geometry = mergeGeometries(parts, false); parts.forEach(value => value.dispose());
-  geometry.computeBoundingSphere();
-  const material = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.FrontSide });
-  const mesh = new THREE.SkinnedMesh(geometry, material);
-  mesh.name = 'Invisible human shadow caster'; mesh.frustumCulled = false;
-  mesh.add(root); mesh.bind(new THREE.Skeleton(bones));
-  return { mesh, root, hips, limbs, triangles: geometry.index.count / 3 };
+  return {
+    object, mesh, update, dispose, triangles: mesh.geometry.index.count / 3,
+    get settling() { return blend > .0001 || Math.abs(yawOffset) > .0001; },
+    snapshot() { return { source: humanData.metadata.source, riggedHuman: true, bones: mesh.skeleton.bones.length,
+      animation: blend < .01 ? 'Idle' : runBlend > .5 ? 'Run' : 'Walk', blend, phase,
+      soleSamples: soleVertices.length, lowestSole, floorCorrection }; },
+  };
 }
 
 const playerFilter = `
@@ -78,11 +135,11 @@ float getPointShadow(sampler2D shadowMap, vec2 shadowMapSize, float shadowIntens
 `;
 
 /** Project the human into the lamp's lighting; static room occlusion stays intact.
- * One 512² map, one skinned draw (~1k triangles), no room or cube-map rerender.
+ * One 512² map, one skinned draw (~6k triangles), no room or cube-map rerender.
  */
 export function createPlayerShadow(renderer, lampPosition) {
   const proxy = createHumanShadowProxy(), casterScene = new THREE.Scene();
-  casterScene.add(proxy.mesh);
+  casterScene.add(proxy.object);
   const shadowCamera = new THREE.PerspectiveCamera(45, 1, .075, 14);
   shadowCamera.position.copy(lampPosition);
   const target = new THREE.WebGLRenderTarget(512, 512, {
@@ -100,7 +157,7 @@ export function createPlayerShadow(renderer, lampPosition) {
   };
   const previous = new THREE.Vector3(Infinity, Infinity, Infinity), focus = new THREE.Vector3();
   const clearColor = new THREE.Color();
-  let phase = 0, amplitude = 0, previousYaw = Infinity, previousMoving = false;
+  let previousYaw = Infinity, previousMoving = false;
   let updates = 0, lastUpdateMs = -Infinity, lastRenderCalls = 0;
   let enabled = true, mapReady = false;
 
@@ -108,25 +165,10 @@ export function createPlayerShadow(renderer, lampPosition) {
     const moving = controls.moving;
     const changed = previous.distanceToSquared(controls.position) > .0000001 ||
       Math.abs(previousYaw - controls.yaw) > .002 || moving !== previousMoving;
-    if (!force && !changed && !moving && amplitude < .002) { lastRenderCalls = 0; return false; }
+    if (!force && !changed && !moving && !proxy.settling) { lastRenderCalls = 0; return false; }
     if (!force && now - lastUpdateMs < 1000 / 30 - .5) { lastRenderCalls = 0; return false; }
     const elapsed = Number.isFinite(lastUpdateMs) ? Math.min((now - lastUpdateMs) / 1000, .1) : dt;
-    phase += Math.max(0, controls.speed) * elapsed * 7.5;
-    amplitude = THREE.MathUtils.damp(amplitude, moving ? (controls.running ? .9 : .55) : 0, 14, elapsed);
-    proxy.mesh.position.copy(controls.position);
-    proxy.mesh.rotation.y = controls.yaw + Math.PI;
-    proxy.hips.position.y = .91 + Math.abs(Math.sin(phase)) * amplitude * .022;
-    for (const { shoulder, elbow, sign } of proxy.limbs.arms) {
-      const swing = Math.sin(phase + (sign < 0 ? Math.PI : 0));
-      shoulder.rotation.x = swing * amplitude * .8;
-      shoulder.rotation.z = sign * -.04;
-      elbow.rotation.x = -.10 - Math.max(0, -swing) * amplitude * .5;
-    }
-    for (const { thigh, knee, sign } of proxy.limbs.legs) {
-      const swing = Math.sin(phase + (sign < 0 ? 0 : Math.PI));
-      thigh.rotation.x = swing * amplitude;
-      knee.rotation.x = Math.max(0, -swing) * amplitude * 1.1;
-    }
+    proxy.update(controls, elapsed);
     focus.copy(controls.position); focus.y = .92;
     const distance = Math.max(.6, shadowCamera.position.distanceTo(focus));
     shadowCamera.fov = THREE.MathUtils.clamp(2 * Math.atan(1.15 / distance) * 180 / Math.PI, 20, 130);
@@ -168,12 +210,12 @@ vQuartoPlayerShadowCoord = vec4(0.0);
       meshCount: 1, triangles: proxy.triangles, mapSize: 512, updates,
       position: { x: previous.x, y: previous.y, z: previous.z }, moving: previousMoving,
       lastUpdateMs: Math.round(lastUpdateMs), lastRenderCalls, mainSceneBody: false,
-      updateHz: 30, staticRoomRedraws: 0,
+      updateHz: 30, staticRoomRedraws: 0, human: proxy.snapshot(),
     };
   }
 
   function dispose() {
-    target.dispose(); proxy.mesh.geometry.dispose(); proxy.mesh.material.dispose(); proxy.mesh.skeleton.dispose();
+    target.dispose(); proxy.dispose();
   }
   function setEnabled(value) {
     enabled = Boolean(value); uniforms.quartoPlayerShadowActive.value = enabled && mapReady ? 1 : 0;

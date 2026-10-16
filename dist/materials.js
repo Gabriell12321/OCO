@@ -87,8 +87,10 @@ export async function createMaterials(renderer, onProgress = () => {}) {
   maps.timber.map = photograph(maps.timber.map, { saturation: .22, gain: 1.10, warmth: [1.04, 1.02, .94] });
   maps.floor.map = photograph(maps.floor.map, { saturation: .55, gain: 1.03, warmth: [1.03, 1.02, .98] });
   maps.plaster.map = photograph(maps.plaster.map, { saturation: .12, gain: 1.15 });
-  maps.timber.roughnessMap = photograph(maps.timber.roughnessMap, { range: [.66, .91] });
-  maps.floor.roughnessMap = photograph(maps.floor.roughnessMap, { range: [.57, .86] });
+  // Worn varnish still catches a broad highlight. Keep the scan's local wear
+  // instead of flattening every timber surface to almost uniform matte.
+  maps.timber.roughnessMap = photograph(maps.timber.roughnessMap, { range: [.43, .80] });
+  maps.floor.roughnessMap = photograph(maps.floor.roughnessMap, { range: [.40, .78] });
   maps.plaster.roughnessMap = photograph(maps.plaster.roughnessMap, { range: [.85, .99] });
 
   function patina(source, strength, seed) {
@@ -225,7 +227,7 @@ export async function createMaterials(renderer, onProgress = () => {}) {
   const blanket = neutralLinen(surface('Weathered tobacco woven throw', blanketMaps, {
     color: 0x898371,
     roughness: 0.97,
-    normalScale: new THREE.Vector2(0.28, 0.28),
+    normalScale: new THREE.Vector2(0.20, 0.20),
     side: THREE.DoubleSide,
     sheen: .23, sheenColor: 0xb9b29a, sheenRoughness: .98,
   }), 1.7);

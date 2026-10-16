@@ -1,16 +1,18 @@
 # Quarto 01 para Windows
 
-Versão 0.5.0, exclusivamente em primeira pessoa. Empacotamento portátil com
+Versão 0.6.0, exclusivamente em primeira pessoa. Empacotamento portátil com
 Electron oficial 44.7.2 para Windows x64. O usuário
 abre `Quarto 01.exe`; Node, navegador, instalação e internet não são necessários.
 
-O perfil DESEMPENHO prioriza FPS; EQUILIBRADO aumenta a resolução interna;
-QUALIDADE usa também suavização de bordas por MSAA4 em um alvo de renderização
-próprio. A troca de perfil não exige reiniciar o aplicativo.
+Todos os perfis suavizam bordas com FXAA. DESEMPENHO prioriza FPS;
+EQUILIBRADO aumenta a resolução interna; QUALIDADE usa resolução maior,
+iluminação de área e filtro completo de sombras. A troca de perfil não exige
+reiniciar o aplicativo. A cena mantém HDR até a conversão AgX/sRGB e o FXAA
+trabalha sobre a imagem final, sem MSAA e sem conversão duplicada de cores.
 
 ## Build
 
-Na pasta do projeto, com Node 22.12 ou superior:
+Na pasta do projeto, com Node 22.15 ou superior:
 
 ```powershell
 node desktop/build.cjs
@@ -36,21 +38,27 @@ O teste espera o quarto carregar, aquece por 5 segundos e mede aproximadamente
 girando. Os comandos passam pelo controlador real do próprio aplicativo.
 Cada fase informa FPS realmente renderizados, tempo médio de CPU e tempos
 de quadro p95/p99. O teste verifica posições, rotação, corrida, primeira pessoa
-e a sombra que acompanha o jogador.
+e a sombra que acompanha o jogador. A fase da passada precisa avançar com a
+distância percorrida em todas as fases de movimento.
 
 Ao concluir, grava `latest.json`, a vista inicial em `latest.png`, a sombra em
-`shadow.png` e um detalhe do cobertor em `blanket.png`, e encerra o programa.
+`shadow.png`, os pés em `feet.png` e um detalhe do cobertor em `blanket.png`,
+e encerra o programa.
 O relatório identifica a GPU efetivamente usada pelo contexto WebGL.
 `--benchmark-quality=performance`, `balanced` ou `quality` permite medir um
 perfil específico.
 
-`--benchmark-msaa4` força MSAA4 no contexto para uma comparação técnica;
-`--benchmark-no-msaa` força o contexto sem MSAA. Na execução normal, o contexto
-direto prioriza desempenho e o perfil QUALIDADE usa seu próprio alvo MSAA4.
+`--benchmark-no-fxaa` (ou `--fxaa=0`) desativa FXAA para comparar a mesma cena
+com o caminho direto de DESEMPENHO/EQUILIBRADO. Nesse diagnóstico, QUALIDADE
+recupera o antigo alvo HDR MSAA4. `--benchmark-msaa4` também desativa FXAA e
+força MSAA4 no contexto; `--benchmark-no-msaa` é um alias do diagnóstico direto.
+Essas opções são comparações técnicas; a execução normal usa FXAA nos três perfis.
 
 `--quality-steady-probe` separa a primeira ativação do perfil QUALIDADE de uma
 amostra de 3 segundos já estabilizada, depois verifica a volta a DESEMPENHO.
-`--capture-views-only` compara a sombra ligada e desligada na mesma câmera.
+`--smoke-profile-cycle` valida a troca dos três perfis e o retorno a DESEMPENHO.
+`--capture-views-only` compara a sombra ligada e desligada na mesma câmera,
+depois captura o quarto, o cobertor e os pés nas vistas frontal e oblíqua.
 
 Se o shell de desenvolvimento herdou `ELECTRON_RUN_AS_NODE=1`, remova essa
 variável apenas do processo que iniciará o teste. O atalho `ABRIR QUARTO.cmd`

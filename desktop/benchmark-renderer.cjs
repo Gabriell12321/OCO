@@ -45,6 +45,7 @@ async function runRendererBenchmark(requestedQuality) {
       playerPosition: s.playerPosition, cameraDirection: s.cameraDirection,
       cameraQuaternion: s.cameraQuaternion, yaw: s.yaw, pitch: s.pitch,
       shadowUpdates: s.playerShadow?.updates, shadowPosition: s.playerShadow?.position,
+      gait: s.gait,
     };
   }
   async function settle() {
@@ -119,6 +120,10 @@ async function runRendererBenchmark(requestedQuality) {
   const movementVerified = walkingPhases.every(phase => phase.movingCoverage >= .25);
   const turningVerified = phases.every(phase => phase.turningVerified);
   const runningVerified = phases.find(phase => phase.intendedRunning).runningSamples > 2;
+  const gaitVerified = walkingPhases.every(phase => {
+    const active = phase.telemetry.filter(sample => sample.moving && sample.gait?.blend > .1);
+    return active.length > 2 && new Set(active.map(sample => Math.round(sample.gait.phase * 100))).size > 2;
+  });
   const shadowPositions = new Set(phases.flatMap(phase => phase.telemetry).map(sample => JSON.stringify(sample.shadowPosition)));
   const shadowMovementVerified = Boolean(finalSnapshot.playerShadow?.active) &&
     finalSnapshot.playerShadow.updates > (initialSnapshot.playerShadow?.updates || 0) && shadowPositions.size > 3;
@@ -133,11 +138,11 @@ async function runRendererBenchmark(requestedQuality) {
   const frameCount = phases.reduce((sum, phase) => sum + phase.frames, 0);
   const aggregate = statistics(allFrames, allCPU, durationMs, frameCount);
   return {
-    version: '0.5.0', test: '35-second-walk-look-run',
+    version: '0.6.0', test: '35-second-walk-look-run',
     renderedAverageFPS: aggregate.renderedFPS, aggregate,
     moving: statistics(movingFrames, movingCPU, movingTime, movingCount),
     idle: phases.find(phase => phase.id === 'idle'), phases,
-    movementVerified, turningVerified, runningVerified, shadowMovementVerified, activeWebGL,
+    movementVerified, turningVerified, runningVerified, gaitVerified, shadowMovementVerified, activeWebGL,
     viewport: { width: innerWidth, height: innerHeight, devicePixelRatio },
     startSnapshot: initialSnapshot, renderer: finalSnapshot,
     loadingVisible: !document.getElementById('loading').classList.contains('hidden'),
