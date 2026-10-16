@@ -1,8 +1,8 @@
 {
   "name": "quarto-01",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "description": "Um único quarto 3D com materiais e iluminação realistas",
-  "scripts": { "start": "node serve.cjs", "test": "node verify.mjs && node tests/first-person.mjs && node tests/player-shadow.mjs && node tests/head-shadow.mjs && node tests/shadow-projection.mjs && node tests/bed-geometry.mjs && node tests/fabric.mjs && node tests/engine.mjs && node tests/shadow-filter.mjs" }
+  "scripts": { "start": "node serve.cjs", "test": "node verify.mjs && node tests/first-person.mjs && node tests/player-shadow.mjs && node tests/head-shadow.mjs && node tests/shadow-projection.mjs && node tests/bed-geometry.mjs && node tests/fabric.mjs && node tests/engine.mjs && node tests/shadow-filter.mjs && node tests/lighting.mjs && node tests/rain.mjs && node tests/audio.mjs" }
 }

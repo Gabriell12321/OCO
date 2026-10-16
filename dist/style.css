@@ -65,6 +65,7 @@ button { font: inherit; -webkit-tap-highlight-color: transparent; }
 .view-actions button:hover { color: #fff9ec; background: #1b1b1799; border-color: #f5ebd722; }
 .view-actions button:focus-visible, .touch-movement button:focus-visible { outline: 1px solid #e6d9bd; outline-offset: 3px; }
 .view-actions svg { width: 20px; height: 20px; }
+#soundBtn[data-sound="off"] .sound-waves, #soundBtn[data-sound="on"] .sound-muted { display: none; }
 #crosshair {
   position: fixed;
   left: 50%;

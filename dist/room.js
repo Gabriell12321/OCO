@@ -171,8 +171,12 @@ export function createRoom(scene, materials) {
   box(.045, 1.49, .055, .4, 1.775, -3.173, windowPaint, .005);
   box(1.6, .035, .055, .4, 1.033, -3.173, windowPaint, .004);
   box(1.6, .035, .055, .4, 2.517, -3.173, windowPaint, .004);
-  const glassMaterial = new THREE.MeshPhysicalMaterial({ color: '#9bafa9', roughness: .13, metalness: .05, transparent: true, opacity: .13, transmission: 0, side: THREE.DoubleSide, depthWrite: false });
+  // Broad, restrained glass reflection; the room's approximate fill emitters
+  // must not appear as several glowing white bulbs in the wet window.
+  const glassMaterial = new THREE.MeshPhysicalMaterial({ color: '#9bafa9', roughness: .22, metalness: 0,
+    specularIntensity: .22, transparent: true, opacity: .13, transmission: 0, side: THREE.FrontSide, depthWrite: false });
   const glass = mesh(new THREE.PlaneGeometry(1.54, 1.45), glassMaterial, .4, 1.775, -3.23); glass.castShadow = false;
+  glass.name = 'Window glass'; glass.renderOrder = 2;
   box(.064, .022, .028, .4, 1.801, -3.128, M.brass, .006);
   cylinder(.009, .009, .025, .4, 1.814, -3.11, M.brass, 12).rotation.x = Math.PI / 2;
   // The exterior is the renderer's photographic night environment, seen only
@@ -428,7 +432,10 @@ export function createRoom(scene, materials) {
   // Faded photographs in layered timber frames. No supernatural props or UI.
   picture(-2.974, 1.72, -1.58, .55, .73, Math.PI / 2, 1);
   picture(2.974, 1.85, 1.47, .62, .46, -Math.PI / 2, 2);
-  return { colliders, bedMetrics, lampPosition: new THREE.Vector3(bedsideX, 1.075, lampZ), windowPosition: new THREE.Vector3(.4, 1.775, -3.18), updates: [] };
+  return { colliders, bedMetrics, lampPosition: new THREE.Vector3(bedsideX, 1.075, lampZ),
+    lampMaterials: { shade, bulb: filament.material },
+    windowPosition: new THREE.Vector3(.4, 1.775, -3.18), windowGlass: glass,
+    windowBounds: { position: glass.position.clone(), width: 1.54, height: 1.45 }, updates: [] };
 
   function roundedOutline(width, depth, radius, cx, y, cz, thickness, material) {
     const shape = new THREE.Shape();

@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
-import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { createRenderPipeline } from './engine/render-pipeline.js';
 import { compileStaticScene } from './engine/static-scene.js';
 import { ResolutionGovernor } from './engine/resolution-governor.js';
 import { createShadowChunk } from './engine/shadow-filter.js';
+import { createRoomLighting, LAMP_SHADOW, LAMP_SHADOW_SIZE } from './engine/room-lighting.js';
+import { createWindowRain } from './weather/rain.js';
+import { createRoomAudio } from './audio/room-audio.js';
 import { createMaterials } from './materials.js';
 import { createRoom } from './room.js';
 import { createControls } from './controls.js';
@@ -20,6 +22,8 @@ const monitor = new PerformanceMonitor();
 let renderer, controls, room, scene, camera, frameHandle = 0;
 let playerShadow, gpuTimer;
 let pipeline, staticSceneStats;
+let lighting, rain, roomAudio;
+const atmosphere = { time: 0, frozen: false, lamp: null, rain: true };
 const resolutionGovernor = new ResolutionGovernor();
 let diagnosticResolutionLock = false;
 const diagnosticFabricState = new Map();
@@ -28,13 +32,10 @@ const useFXAA = diagnosticQuery.get('fxaa') !== '0';
 let quality = 'performance', ready = false, desktopPaused = false;
 let adaptiveScale = 1;
 let previousTick = 0, previousRender = 0, accumulator = 0, elapsed = 0;
-const shadowLights = [];
-const lightingProfiles = { full: [], efficient: [] };
+let shadowLights = [];
 const surfaceProfiles = new Map();
 let gpuRenderer = '', gpuVendor = '', msaaSamples = 0;
 const STEP_MS = 1000 / 60;
-const LAMP_SHADOW = Object.freeze({ bias: -.0005, normalBias: .012, radius: 4.2 });
-const LAMP_SHADOW_SIZE = 1024;
 
 // OCO point-light filtering accounts for the receiver plane at each tap.
 const efficientShadowChunk = createShadowChunk(false);
@@ -61,8 +62,8 @@ function registerSurfaceProfiles() {
 
 function applyLightingProfile() {
   const full = quality === 'quality';
-  lightingProfiles.full.forEach(light => { light.visible = full; });
-  lightingProfiles.efficient.forEach(light => { light.visible = !full; });
+  lighting?.setQuality(quality);
+  rain?.setQuality(quality);
   for (const [material, original] of surfaceProfiles) {
     if (material.isMeshPhysicalMaterial) material.sheen = full ? original.sheen : 0;
     material.needsUpdate = true;
@@ -90,42 +91,6 @@ function simplifyMaterials() {
       }
     }
   });
-}
-
-function addLighting() {
-  RectAreaLightUniformsLib.init();
-  scene.add(new THREE.HemisphereLight(0x9aa9ba, 0x27231e, .12));
-  const windowLight = new THREE.RectAreaLight(0xa1b7cb, .85, 1.56, 1.48);
-  windowLight.position.copy(room.windowPosition).add(new THREE.Vector3(0, 0, .17));
-  windowLight.lookAt(-.5, 1.1, 1.7); scene.add(windowLight);
-  lightingProfiles.full.push(windowLight);
-  const windowFill = new THREE.PointLight(0xa1b7cb, .75, 8, 2);
-  windowFill.position.copy(room.windowPosition).add(new THREE.Vector3(0, 0, .24));
-  scene.add(windowFill); lightingProfiles.efficient.push(windowFill);
-  const moon = new THREE.DirectionalLight(0xacc2d5, .16);
-  moon.position.set(-1, 4.2, -7.5); moon.target.position.set(.6, .2, 1.8);
-  moon.castShadow = true; moon.shadow.mapSize.set(1024, 1024);
-  moon.shadow.camera.left = -5; moon.shadow.camera.right = 5;
-  moon.shadow.camera.top = 5; moon.shadow.camera.bottom = -5;
-  moon.shadow.camera.near = .2; moon.shadow.camera.far = 20;
-  moon.shadow.bias = -.00012; moon.shadow.normalBias = .008; moon.shadow.radius = 3;
-  scene.add(moon, moon.target);
-  const lamp = new THREE.PointLight(0xffd1a0, 5.8, 6, 2);
-  lamp.position.copy(room.lampPosition); lamp.castShadow = true;
-  lamp.shadow.mapSize.set(LAMP_SHADOW_SIZE, LAMP_SHADOW_SIZE);
-  lamp.shadow.camera.near = .04; lamp.shadow.camera.far = 8;
-  Object.assign(lamp.shadow, LAMP_SHADOW);
-  scene.add(lamp);
-  shadowLights.push(moon, lamp);
-  const bounce = new THREE.RectAreaLight(0xffd9b1, .55, .65, .45);
-  bounce.position.copy(room.lampPosition).add(new THREE.Vector3(.05, .65, -.25));
-  bounce.lookAt(-.4, 2.8, -1.8); scene.add(bounce);
-  lightingProfiles.full.push(bounce);
-  const lampFill = new THREE.PointLight(0xffd9b1, .40, 4.5, 2);
-  lampFill.position.copy(bounce.position); scene.add(lampFill);
-  lightingProfiles.efficient.push(lampFill);
-  const coolBounce = new THREE.PointLight(0xa6b9c6, .42, 6, 2);
-  coolBounce.position.set(1.1, 1.9, -.3); scene.add(coolBounce);
 }
 
 function resizeDrawingBuffer() {
@@ -172,11 +137,14 @@ function getPerformanceSnapshot() {
   const stats = monitor.snapshot();
   const width = renderer?.domElement.width || 0, height = renderer?.domElement.height || 0;
   return {
-    ...stats, version: '0.7.0', ready, quality, qualityLabel: PROFILES[quality].label,
+    ...stats, version: '0.8.0', ready, quality, qualityLabel: PROFILES[quality].label,
     character: false, firstPersonOnly: true,
     renderer: 'WebGL2', pathTracing: false, shadows: 'cached',
     engine: 'OCO', engineBackend: 'Three.js / WebGL2', engineVersion: '0.1',
     staticScene: staticSceneStats || null, bed: room?.bedMetrics || null,
+    atmosphere: { time: atmosphere.time, frozen: atmosphere.frozen, light: lighting?.snapshot() || null,
+      rain: rain?.snapshot() || null },
+    audio: roomAudio?.snapshot() || null,
     gpuRenderer, gpuVendor,
     ...pipeline?.snapshot(msaaSamples),
     gpuTiming: gpuTimer?.snapshot() || null,
@@ -215,11 +183,13 @@ function updateDiagnostics(now) {
 
 function pause() {
   desktopPaused = true; cancelAnimationFrame(frameHandle); frameHandle = 0;
+  roomAudio?.setPaused(true);
   monitor.suspend(); previousTick = previousRender = accumulator = 0;
 }
 
 function resume() {
   desktopPaused = false;
+  roomAudio?.setPaused(document.hidden);
   if (ready && !document.hidden && !frameHandle) frameHandle = requestAnimationFrame(frame);
 }
 
@@ -238,6 +208,10 @@ function frame(now) {
   gpuTimer.poll(); gpuTimer.begin();
   renderer.info.reset();
   controls.update(dt);
+  if (!atmosphere.frozen) atmosphere.time += dt;
+  const lampGain = lighting.update(atmosphere.time, { lampOverride: atmosphere.lamp, emitEvents: !atmosphere.frozen });
+  rain.setLampLevel(lampGain); rain.update(atmosphere.time, dt);
+  roomAudio.update(camera, dt);
   for (const update of room.updates || []) update(elapsed, dt);
   playerShadow.update(controls, dt, now);
   renderRoom();
@@ -246,7 +220,7 @@ function frame(now) {
 }
 
 window.Quarto01 = {
-  version: '0.7.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
+  version: '0.8.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
   get ready() { return ready; }, get quality() { return quality; }, get fps() { return monitor.fps; },
   get frameTimes() { return monitor.frameTimes.slice(); },
   get renderStats() { return renderer ? { ...renderer.info.render } : {}; },
@@ -255,6 +229,25 @@ window.Quarto01 = {
   diagnosticLook: (dx, dy) => controls?.diagnosticLook?.(dx, dy),
   setDiagnosticShadowEnabled: value => playerShadow?.setEnabled(value),
   setDiagnosticView: setDiagnosticView,
+  setDiagnosticAtmosphere: options => {
+    if (!window.desktopDiagnostics || !ready || !options || typeof options !== 'object') return false;
+    if (Number.isFinite(options.time)) atmosphere.time = Math.max(0, options.time);
+    if (typeof options.frozen === 'boolean') atmosphere.frozen = options.frozen;
+    if (options.lamp === null || Number.isFinite(options.lamp)) atmosphere.lamp = options.lamp === null ? null : THREE.MathUtils.clamp(options.lamp, 0, 1);
+    if (typeof options.rain === 'boolean') { atmosphere.rain = options.rain; rain.setEnabled(options.rain); }
+    const gain = lighting.update(atmosphere.time, { lampOverride: atmosphere.lamp, emitEvents: false });
+    rain.setLampLevel(gain); rain.setTime(atmosphere.time);
+    return true;
+  },
+  diagnosticAudio: (action, value) => {
+    if (!window.desktopDiagnostics || !roomAudio) return false;
+    if (action === 'unlock') return roomAudio.unlock();
+    if (action === 'mute') roomAudio.setMuted(Boolean(value));
+    else if (action === 'pause') roomAudio.setPaused(Boolean(value));
+    else if (action === 'sample') return roomAudio.sample();
+    else if (action !== 'snapshot') return false;
+    return roomAudio.snapshot();
+  },
   setDiagnosticFabricMode: mode => {
     if (!window.desktopDiagnostics || !ready || !['base', 'normal-off', 'receive-shadow-off', 'shadow-bias', 'shadow-filter'].includes(mode)) return false;
     // Save every shared material's initial state before changing any instance.
@@ -294,6 +287,8 @@ function setDiagnosticView(id) {
     'bed-right': { position: [.85, .3], yaw: .77, pitch: -.4 },
     'bed-foot': { position: [-.4, .3], yaw: .2, pitch: -.4 },
     'bed-left': { position: [-2.4, -1.25], yaw: -1.344, pitch: -.52 },
+    window: { position: [.85, -.8], yaw: .1835, pitch: .06 },
+    'window-close': { position: [1.15, -2.2], yaw: .63, pitch: .12 },
   };
   if (!poses[id] || !controls.setDiagnosticPose(poses[id])) return false;
   playerShadow?.update(controls, 0, performance.now(), true);
@@ -334,7 +329,13 @@ async function init() {
   }
   label.textContent = 'Preparando os materiais do quarto...'; progress.style.width = '72%';
   room = createRoom(scene, materials); simplifyMaterials();
-  staticSceneStats = compileStaticScene(scene); addLighting();
+  staticSceneStats = compileStaticScene(scene);
+  roomAudio = createRoomAudio({ canvas, button: document.getElementById('soundBtn'),
+    windowPosition: room.windowPosition, lampPosition: room.lampPosition });
+  lighting = createRoomLighting(scene, room, { onFlicker: strength => roomAudio.triggerFlicker(strength) });
+  shadowLights = lighting.shadowLights;
+  rain = createWindowRain(scene, { windowPosition: room.windowBounds.position,
+    width: room.windowBounds.width, height: room.windowBounds.height, glass: room.windowGlass });
   playerShadow = createPlayerShadow(renderer, room.lampPosition);
   registerSurfaceProfiles(); applyLightingProfile();
   controls = createControls(camera, canvas, room.colliders);
@@ -354,11 +355,13 @@ async function init() {
   window.addEventListener('resize', resizeDrawingBuffer);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      roomAudio?.setPaused(true);
       cancelAnimationFrame(frameHandle); frameHandle = 0; monitor.suspend();
       previousTick = previousRender = accumulator = 0;
-    } else if (!desktopPaused && !frameHandle) frameHandle = requestAnimationFrame(frame);
+    } else if (!desktopPaused && !frameHandle) { roomAudio?.setPaused(false); frameHandle = requestAnimationFrame(frame); }
   });
   window.addEventListener('quarto:pause', pause); window.addEventListener('quarto:resume', resume);
+  window.addEventListener('pagehide', () => { roomAudio?.dispose(); }, { once: true });
   canvas.addEventListener('webglcontextlost', event => {
     event.preventDefault(); pause(); ready = false;
     showError('A renderização foi interrompida. Reabra o quarto para continuar.');

@@ -79,10 +79,12 @@ async function build() {
   for (const name of firstPersonOnly ? ['ASSETS.md', 'SHADOW-ASSET.md'] : ['ASSETS.md', 'CHARACTER.md', 'SHADOW-ASSET.md']) {
     if (fs.existsSync(path.join(projectRoot, name))) fs.copyFileSync(path.join(projectRoot, name), path.join(credits, name));
   }
-  if (fs.existsSync(path.join(projectRoot, 'ENGINE.md'))) {
-    const documentation = path.join(appRoot, 'DOCUMENTACAO');
-    fs.mkdirSync(documentation, { recursive: true });
-    fs.copyFileSync(path.join(projectRoot, 'ENGINE.md'), path.join(documentation, 'ENGINE.md'));
+  for (const name of ['ENGINE.md', 'VALIDACAO.md', `ATUALIZACAO-${appVersion}.md`]) {
+    if (fs.existsSync(path.join(projectRoot, name))) {
+      const documentation = path.join(appRoot, 'DOCUMENTACAO');
+      fs.mkdirSync(documentation, { recursive: true });
+      fs.copyFileSync(path.join(projectRoot, name), path.join(documentation, name));
+    }
   }
   fs.writeFileSync(path.join(appRoot, 'build-info.json'), JSON.stringify({
     product: 'Quarto 01', version: appVersion, platform: 'win32-x64', electronVersion: VERSION,

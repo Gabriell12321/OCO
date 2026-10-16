@@ -1,5 +1,29 @@
 'use strict';
 
+function createTimingGuard(room) {
+  const started = performance.now(), events = [];
+  const state = () => ({ paused: room.getPerformanceSnapshot().paused,
+    hidden: document.hidden, focused: document.hasFocus() });
+  const initial = state();
+  const record = event => events.push({ type: event.type, elapsedMs: performance.now() - started, ...state() });
+  for (const name of ['quarto:pause', 'blur']) window.addEventListener(name, record);
+  document.addEventListener('visibilitychange', record);
+  return {
+    state,
+    finish(frameTimes, elapsedMs, telemetry) {
+      for (const name of ['quarto:pause', 'blur']) window.removeEventListener(name, record);
+      document.removeEventListener('visibilitychange', record);
+      const final = state(), accountedMs = frameTimes.reduce((sum, ms) => sum + ms, 0);
+      const states = [initial, final, ...telemetry];
+      const pauseSamples = states.filter(s => s.paused || s.hidden || !s.focused).length;
+      const pauseEvents = events.filter(e => e.type !== 'visibilitychange' || e.hidden).length;
+      const missingMs = elapsedMs - accountedMs;
+      return { valid: pauseSamples === 0 && pauseEvents === 0 && Math.abs(missingMs) < 150,
+        accountedMs, elapsedMs, missingMs, pauseSamples, pauseEvents, events, initial, final };
+    },
+  };
+}
+
 /** Executed only inside our packaged room by the Electron diagnostic CLI. */
 async function runRendererBenchmark(requestedQuality) {
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -42,6 +66,7 @@ async function runRendererBenchmark(requestedQuality) {
     const s = snapshot();
     return {
       elapsedMs: round(elapsedMs), moving: Boolean(s.moving), running: Boolean(s.running),
+      paused: s.paused, hidden: document.hidden, focused: document.hasFocus(),
       playerPosition: s.playerPosition, cameraDirection: s.cameraDirection,
       cameraQuaternion: s.cameraQuaternion, yaw: s.yaw, pitch: s.pitch,
       shadowUpdates: s.playerShadow?.updates, shadowPosition: s.playerShadow?.position,
@@ -62,13 +87,20 @@ async function runRendererBenchmark(requestedQuality) {
     { id: 'walk-and-look', duration: 8000, move: true, turn: true, run: false },
     { id: 'run-and-look', duration: 10000, move: true, turn: true, run: true },
   ];
-  const phases = [];
+  const phases = [], interruptedAttempts = [];
   const allFrames = [], allCPU = [];
   const initialSnapshot = snapshot();
   try {
-    for (const plan of plans) {
+    for (let planIndex = 0; planIndex < plans.length; planIndex++) {
+      const plan = plans[planIndex];
+      const focusDeadline = performance.now() + 15000;
+      while (snapshot().paused || document.hidden || !document.hasFocus()) {
+        if (performance.now() > focusDeadline) throw new Error('O teste perdeu o foco por mais de 15 segundos.');
+        await delay(100);
+      }
       await reset();
       const before = snapshot(), telemetry = [sampleTelemetry(0)];
+      const timingGuard = createTimingGuard(room);
       const phaseStart = performance.now();
       let lastYawOffset = 0, lastPitchOffset = 0, lastTelemetry = 0, lookInputs = 0;
       while (performance.now() - phaseStart < plan.duration) {
@@ -92,15 +124,23 @@ async function runRendererBenchmark(requestedQuality) {
       const after = snapshot(), frameCount = after.totalFrames - before.totalFrames;
       const trace = room.getPerformanceTrace();
       if (!Array.isArray(trace.frameTimes) || !Array.isArray(trace.cpuTimes)) throw new Error('Trace de quadros incompleto.');
-      if (frameCount <= 0 || trace.frameTimes.length < frameCount || trace.cpuTimes.length < frameCount) throw new Error('A fase não gerou uma amostra completa de quadros.');
-      const frameTimes = trace.frameTimes.slice(-frameCount), cpuTimes = trace.cpuTimes.slice(-frameCount);
-      allFrames.push(...frameTimes); allCPU.push(...cpuTimes);
+      if (trace.frameTimes.length < frameCount || trace.cpuTimes.length < frameCount) throw new Error('A fase não gerou uma amostra completa de quadros.');
+      const frameTimes = frameCount > 0 ? trace.frameTimes.slice(-frameCount) : [], cpuTimes = frameCount > 0 ? trace.cpuTimes.slice(-frameCount) : [];
       telemetry.push(sampleTelemetry(elapsedMs));
+      const timingIntegrity = timingGuard.finish(frameTimes, elapsedMs, telemetry);
+      if (!timingIntegrity.valid) {
+        useKeys([]);
+        interruptedAttempts.push({ id: plan.id, timingIntegrity, before, after });
+        if (interruptedAttempts.filter(attempt => attempt.id === plan.id).length >= 3) throw new Error('Três tentativas interrompidas na fase ' + plan.id);
+        planIndex--; continue;
+      }
+      allFrames.push(...frameTimes); allCPU.push(...cpuTimes);
       const movingSamples = telemetry.filter(sample => sample.moving).length;
       const runningSamples = telemetry.filter(sample => sample.running).length;
       const directions = new Set(telemetry.map(sample => JSON.stringify(sample.cameraDirection || sample.cameraQuaternion || { yaw: sample.yaw, pitch: sample.pitch })));
       phases.push({
         id: plan.id, ...statistics(frameTimes, cpuTimes, elapsedMs, frameCount),
+        timingIntegrity,
         intendedMovement: plan.move, intendedTurning: plan.turn, intendedRunning: plan.run,
         lookInputs, movingSamples, runningSamples, samples: telemetry.length,
         movingCoverage: round(movingSamples / telemetry.length),
@@ -143,6 +183,7 @@ async function runRendererBenchmark(requestedQuality) {
     moving: statistics(movingFrames, movingCPU, movingTime, movingCount),
     idle: phases.find(phase => phase.id === 'idle'), phases,
     movementVerified, turningVerified, runningVerified, gaitVerified, shadowMovementVerified, activeWebGL,
+    timingVerified: phases.every(phase => phase.timingIntegrity.valid), interruptedAttempts,
     viewport: { width: innerWidth, height: innerHeight, devicePixelRatio },
     startSnapshot: initialSnapshot, renderer: finalSnapshot,
     loadingVisible: !document.getElementById('loading').classList.contains('hidden'),
@@ -180,6 +221,7 @@ async function runBedPhase(plan) {
   }
   pose(); await delay(250);
   const before = room.getPerformanceSnapshot(), gpuTimes = [], telemetry = [];
+  const timingGuard = createTimingGuard(room);
   const originalQuery = gl.getQueryParameter;
   // Observe the existing nonblocking timer only after its result is available.
   // No new GPU queries, gl.finish(), or query-result waits are introduced.
@@ -203,6 +245,7 @@ async function runBedPhase(plan) {
         const s = room.getPerformanceSnapshot();
         telemetry.push({ elapsedMs: elapsed, width: s.drawingBufferWidth, height: s.drawingBufferHeight,
           adaptiveScale: s.adaptiveScale, cameraQuaternion: s.cameraQuaternion, playerPosition: s.playerPosition,
+          ...timingGuard.state(),
           yaw: s.cameraYaw, pitch: s.cameraPitch });
         lastSample = elapsed;
       }
@@ -211,8 +254,9 @@ async function runBedPhase(plan) {
   } finally { gl.getQueryParameter = originalQuery; }
   const elapsedMs = performance.now() - started, after = room.getPerformanceSnapshot();
   const count = after.totalFrames - before.totalFrames, trace = room.getPerformanceTrace();
-  if (count <= 0 || trace.frameTimes.length < count || trace.cpuTimes.length < count) throw new Error('Amostra incompleta da vista ' + plan.id);
-  const frameTimes = trace.frameTimes.slice(-count), cpuTimes = trace.cpuTimes.slice(-count);
+  if (trace.frameTimes.length < count || trace.cpuTimes.length < count) throw new Error('Amostra incompleta da vista ' + plan.id);
+  const frameTimes = count > 0 ? trace.frameTimes.slice(-count) : [], cpuTimes = count > 0 ? trace.cpuTimes.slice(-count) : [];
+  const timingIntegrity = timingGuard.finish(frameTimes, elapsedMs, telemetry);
   const round = value => Math.round(value * 100) / 100;
   const summarize = values => {
     const sorted = values.slice().sort((a, b) => a - b);
@@ -229,7 +273,7 @@ async function runBedPhase(plan) {
   const result = { id: plan.id, view: plan.view, version: room.version, durationMs: round(elapsedMs),
     frames: count, renderedFPS: round(count * 1000 / elapsedMs), frame: summarize(frameTimes),
     cpu: summarize(cpuTimes), gpu: { available: before.gpuTiming?.available === true, ...summarize(gpuTimes) },
-    fixedResolution, poseVerified, lookInputs, turningVerified: !plan.turn || new Set(telemetry.map(s => JSON.stringify(s.cameraQuaternion))).size > 3,
+    fixedResolution, poseVerified, timingIntegrity, lookInputs, turningVerified: !plan.turn || new Set(telemetry.map(s => JSON.stringify(s.cameraQuaternion))).size > 3,
     before, after, telemetry, frameTimes, cpuTimes, gpuTimes };
   // Every before/after screenshot uses the exact same camera, independent of
   // the number of frames rendered during the sweep.
@@ -237,14 +281,78 @@ async function runBedPhase(plan) {
   return result;
 }
 
+async function waitForAudioClock() {
+  const room = window.Quarto01, started = performance.now();
+  const initial = room.getPerformanceSnapshot().audio, samples = [];
+  while (performance.now() - started < 3000) {
+    const state = room.getPerformanceSnapshot().audio;
+    samples.push({ wallMs: performance.now() - started, contextTime: state.contextTime,
+      masterGain: state.masterGain, contextState: state.contextState, paused: state.paused,
+      muted: state.muted, background: state.background });
+    if (state.contextState === 'running' && !state.paused && !state.muted && !state.background &&
+      state.masterGain >= .7 && state.contextTime - initial.contextTime >= .08) {
+      return { ready: true, elapsedMs: performance.now() - started, initial, final: state, samples };
+    }
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  return { ready: false, elapsedMs: performance.now() - started, initial, final: room.getPerformanceSnapshot().audio, samples };
+}
+
+async function runWeatherAudioCheck() {
+  const room = window.Quarto01, delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const snapshot = () => room.getPerformanceSnapshot();
+  const sampleState = async () => ({ sample: await room.diagnosticAudio('sample'), snapshot: snapshot().audio });
+  const startup = await waitForAudioClock();
+  const running = await sampleState();
+  room.diagnosticAudio('mute', true); await delay(180);
+  const muted = await sampleState();
+  room.diagnosticAudio('mute', false); await delay(180);
+  room.diagnosticAudio('pause', true); await delay(180);
+  const paused = await sampleState();
+  room.diagnosticAudio('pause', false); await delay(180);
+  const resumed = await sampleState();
+  room.pause(); await delay(180);
+  const gamePaused = { ...await sampleState(), renderPaused: snapshot().paused };
+  room.resume(); await delay(200);
+  const gameResumed = { ...await sampleState(), renderPaused: snapshot().paused };
+  room.setDiagnosticAtmosphere({ time: 5.3, frozen: false, rain: true, lamp: null });
+  const beforeFlicker = snapshot(), samples = [], started = performance.now();
+  while (performance.now() - started < 3000) {
+    const s = snapshot();
+    samples.push({ time: s.atmosphere.time, lampGain: s.atmosphere.light.lampGain,
+      shadeGain: s.atmosphere.light.shadeGain, lightEvents: s.atmosphere.light.flickerEvents,
+      soundEvents: s.audio.flickerEventsPlayed, voices: s.audio.activeVoices });
+    await delay(50);
+  }
+  const afterFlicker = snapshot();
+  const minimum = samples.reduce((a, b) => b.lampGain < a.lampGain ? b : a);
+  const lightEvents = afterFlicker.atmosphere.light.flickerEvents - beforeFlicker.atmosphere.light.flickerEvents;
+  const soundEvents = afterFlicker.audio.flickerEventsPlayed - beforeFlicker.audio.flickerEventsPlayed;
+  const isAudible = state => state.snapshot.unlocked && state.snapshot.contextState === 'running' && state.sample.rms > .000001;
+  const isSilent = state => state.sample.rms < .000001 && state.sample.peak < .000001 && state.snapshot.playingSources === 0;
+  const passed = startup.ready && isAudible(running) && muted.snapshot.muted && isSilent(muted) &&
+    paused.snapshot.paused && isSilent(paused) && isAudible(resumed) &&
+    gamePaused.renderPaused && gamePaused.snapshot.paused && isSilent(gamePaused) &&
+    !gameResumed.renderPaused && isAudible(gameResumed) &&
+    lightEvents >= 2 && soundEvents >= 2 && minimum.lampGain < .3 &&
+    samples.every(s => s.lampGain === s.shadeGain && s.voices <= afterFlicker.audio.voiceLimit) &&
+    afterFlicker.atmosphere.light.staticShadowPassesPerFlicker === 0 && !afterFlicker.audio.lastError;
+  room.diagnosticAudio('mute', true);
+  return { passed, startup, running, muted, paused, resumed, gamePaused, gameResumed,
+    flicker: { lightEvents, soundEvents, minimum, samples, before: beforeFlicker.atmosphere,
+      after: afterFlicker.atmosphere, audio: afterFlicker.audio } };
+}
+
 module.exports = {
   buildBenchmarkScript(quality) {
-    return '(' + runRendererBenchmark.toString() + ')(' + JSON.stringify(quality) + ')';
+    return '(() => { const createTimingGuard = ' + createTimingGuard.toString() + '; return (' + runRendererBenchmark.toString() + ')(' + JSON.stringify(quality) + '); })()';
   },
   buildBedPrepareScript(quality) {
     return '(' + prepareBedBenchmark.toString() + ')(' + JSON.stringify(quality) + ')';
   },
   buildBedPhaseScript(plan) {
-    return '(' + runBedPhase.toString() + ')(' + JSON.stringify(plan) + ')';
+    return '(() => { const createTimingGuard = ' + createTimingGuard.toString() + '; return (' + runBedPhase.toString() + ')(' + JSON.stringify(plan) + '); })()';
   },
+  buildAudioReadyScript() { return '(' + waitForAudioClock.toString() + ')()'; },
+  buildWeatherAudioScript() { return '(() => { const waitForAudioClock = ' + waitForAudioClock.toString() + '; return (' + runWeatherAudioCheck.toString() + ')(); })()'; },
 };

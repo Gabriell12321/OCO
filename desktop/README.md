@@ -1,6 +1,6 @@
 # Quarto 01 para Windows
 
-Versão 0.7.0, exclusivamente em primeira pessoa. Empacotamento portátil com
+Versão 0.8.0, exclusivamente em primeira pessoa. Empacotamento portátil com
 Electron oficial 44.7.2 para Windows x64. O usuário
 abre `Quarto 01.exe`; Node, navegador, instalação e internet não são necessários.
 
@@ -23,7 +23,7 @@ SHA256 contra o valor publicado no `SHASUMS256.txt` da versão fixa. Não instal
 pacotes, não modifica a política de execução do Windows e não altera o sistema.
 
 Saídas: `../Windows/Quarto 01/Quarto 01.exe` e `../Quarto 01 Windows.zip`.
-O pacote inclui a descrição da OCO Room Engine em `DOCUMENTACAO/ENGINE.md`.
+O pacote inclui a descrição da OCO Room Engine e as notas da versão em `DOCUMENTACAO/`.
 
 `--refresh` atualiza o conteúdo usando o runtime que já foi extraído. `--skip-zip`
 omite a compactação durante as iterações de desenvolvimento.
@@ -41,6 +41,11 @@ Cada fase informa FPS realmente renderizados, tempo médio de CPU e tempos
 de quadro p95/p99. O teste verifica posições, rotação, corrida, primeira pessoa
 e a sombra que acompanha o jogador. A fase da passada precisa avançar com a
 distância percorrida em todas as fases de movimento.
+
+O áudio é desbloqueado antes do aquecimento para medir a exploração com chuva
+e lâmpada piscando. Cada fase verifica foco, pausas e a soma dos tempos de
+quadro contra o tempo de relógio. Fases interrompidas ficam registradas e são
+repetidas até duas vezes; uma interrupção não é publicada como queda de FPS.
 
 Ao concluir, grava `latest.json`, a vista inicial em `latest.png`, a sombra em
 `shadow.png`, os pés em `feet.png` e um detalhe do cobertor em `blanket.png`,
@@ -75,6 +80,18 @@ oferece essa opção de diagnóstico. O resultado inclui os cinco PNGs.
 modos de material/sombra, mantendo a câmera imóvel para investigar artefatos.
 `--capture-bed-base` captura somente o resultado normal nos três lados da cama
 e na parede com a sombra do jogador.
+
+`--benchmark-weather` mede duas vistas da janela, cada uma por 4 segundos com
+chuva desligada e ligada, na mesma resolução fixa. Captura os pares, a lâmpada
+acesa, fraca e durante a piscada, além da janela de perto em QUALIDADE.
+Valida o áudio bloqueado antes da interação, desbloqueio com gesto real,
+RMS após o ganho final, silêncio ao silenciar/pausar e retorno ao retomar.
+Confere ainda que os estalos acompanham duas piscadas sem refazer o mapa
+estático de sombras. As comparações de sombra antigas congelam a iluminação
+e desligam a chuva para preservar pares de imagens idênticos.
+`--probe-audio` executa apenas a verificação de áudio, incluindo a partida do
+dispositivo: aguarda avanço de pelo menos 80 ms no relógio do AudioContext e
+ganho estabilizado, por no máximo 3 segundos, antes de exigir RMS não nulo.
 
 Se o shell de desenvolvimento herdou `ELECTRON_RUN_AS_NODE=1`, remova essa
 variável apenas do processo que iniciará o teste. O atalho `ABRIR QUARTO.cmd`

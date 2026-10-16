@@ -1,4 +1,88 @@
-# Validação da versão 0.7.0
+# Validação da versão 0.8.0
+
+Aplicativo Windows na Intel Iris Xe (D3D11/ANGLE), janela de 1900 × 977,
+perfil Desempenho com FXAA e resolução interna fixa de 1004 × 516.
+As vistas da janela foram medidas por quatro segundos após aquecimento,
+mantendo a câmera e a iluminação iguais, com chuva desligada e ligada.
+O áudio permaneceu bloqueado nessa comparação para isolar o custo visual.
+
+| Vista | Chuva | FPS | Quadro p95 | GPU média |
+| --- | --- | ---: | ---: | ---: |
+| Janela | Desligada | 60,20 | 16,8 ms | 8,42 ms |
+| Janela | Ligada | 60,01 | 16,9 ms | 8,35 ms |
+| Vidro de perto | Desligada | 60,02 | 16,9 ms | 7,50 ms |
+| Vidro de perto | Ligada | 60,11 | 16,9 ms | 7,27 ms |
+
+As pequenas diferenças de GPU ficam dentro da variação destas amostras
+curtas; não significam que adicionar chuva acelere a GPU. A apresentação
+é limitada a 60 Hz e a contagem sobre intervalos curtos pode arredondar
+ligeiramente acima de 60 FPS. Estes números descrevem esta máquina e este
+perfil, sem garantir o mesmo desempenho em outras configurações.
+
+O percurso final de 35,07 segundos foi medido com **chuva, piscadas e áudio
+ativos**, incluindo caminhada, corrida e rotação da câmera. Todas as fases
+tiveram cobertura temporal válida, sem pausas nem repetição:
+
+| Medida | Percurso completo | Trechos de movimento |
+| --- | ---: | ---: |
+| FPS renderizados | 60,02 | 60,02 |
+| Quadro médio | 16,67 ms | 16,67 ms |
+| Quadro p95 | 16,9 ms | 16,8 ms |
+| Quadro p99 | 16,9 ms | 16,9 ms |
+| CPU média | 3,44 ms | 3,46 ms |
+
+O áudio estava desbloqueado e com sinal medido antes do aquecimento. A chuva
+permaneceu ativa e a escala permaneceu em 1004 × 516. Não houve erros no
+percurso. Relatório: `desktop/results/v0.8.0-movement-final/latest.json`.
+
+O teste verifica foco, pausa, visibilidade e cobertura temporal. Uma amostra
+interrompida é registrada e repetida, com limite de três tentativas. Só são
+aceitas fases cuja soma dos tempos de quadro difere do tempo medido em menos
+de 150 ms. As primeiras medições interrompidas por perda de foco foram
+descartadas; o teste final também registrou uma repetição antes de obter as
+quatro amostras válidas acima.
+
+Capturas nativas em Desempenho e Qualidade confirmaram filetes de chuva fora
+do quarto, gotas e escorrimentos no vidro, molduras ocluindo a água e reflexos
+mais discretos. As comparações de chuva usam a mesma pose e o mesmo instante
+congelado. Os buffers de instâncias permanecem constantes; a animação muda
+somente uniforms. A chuva usa dois lotes e 1.680 triângulos em Desempenho.
+
+O teste da piscada confirmou duas quedas de luz e dois estalos correspondentes,
+com ganho mínimo observado de 0,09. Luz direta, preenchimento quente, cúpula,
+filamento e reflexo nas gotas compartilham esse ganho. Nenhuma piscada
+invalida os mapas estáticos de sombra. A sequência usa falhas espaçadas,
+com recuperação gradual, em vez de brilho aleatório a cada quadro.
+
+O teste específico de áudio passou. O dispositivo precisou de 595 ms de
+tempo real para avançar 112 ms no relógio do AudioContext e estabilizar o
+ganho em 0,72. Depois disso, o sinal final apresentou RMS de 0,03846 e pico
+de 0,14279, sem saturação. Mute e pausa produziram RMS e pico zero; a retomada
+voltou a produzir sinal (RMS 0,04562). Foram confirmados dois eventos de luz
+e dois estalos. Não houve áudio nem criação de contexto antes da interação.
+O teste mantém o requisito de sinal não nulo e falha se o dispositivo não
+estabilizar em até três segundos. Relatório: `v0.8.0-audio-final/latest.json`.
+
+Relatório visual e de custo da chuva:
+`desktop/results/v0.8.0-weather-final/latest.json`. O resultado agregado dessa
+rodada sinalizou a inicialização do dispositivo de áudio, esclarecida e
+validada pelo teste específico acima; as quatro fases de renderização têm
+integridade temporal válida. Os comandos estão em `desktop/README.md`.
+
+As doze verificações locais passaram: arquivos e geometria do quarto,
+controles, corpo humano, cabeça selada, profundidade da sombra, cama, tecido,
+engine, filtro de sombras, iluminação, chuva e áudio. A inspeção independente
+do código não encontrou bloqueios. A troca dos três perfis gráficos e o
+retorno a Desempenho passaram sem erros ou avisos nessa execução
+(`desktop/results/v0.8.0-smoke-final/latest.json`).
+
+Na regressão da sombra humana, a atmosfera foi congelada para comparar
+imagens idênticas. Os três lados da cama tiveram diferença zero entre sombra
+ligada e desligada. Na parede, foram escurecidos 203.418 pixels e nenhum foi
+clareado. A sombra acompanhou o jogador com atraso espacial máximo de 1,88 cm.
+Nenhuma partícula foi desenhada dentro do quarto.
+
+## Referência da versão 0.7.0
 
 Aplicativo Windows na Intel Iris Xe (D3D11/ANGLE), janela de 1900 × 977,
 perfil Desempenho, resolução interna fixa de 1004 × 516 e FXAA. Comparação

@@ -38,6 +38,21 @@ escala em 1, para não atribuir a uma otimização o ganho de uma resolução me
 
 ## Conteúdo e materiais
 
+`dist/engine/room-lighting.js` mantém os emissores fixos e amostra uma sequência
+determinística de falhas elétricas. Um único sinal altera luz direta,
+preenchimento, emissivos e reflexos na água; o evento de início dispara o som.
+As intensidades mudam sem invalidar os mapas estáticos de sombra.
+
+`dist/weather/rain.js` usa dois lotes instanciados e anima o movimento no
+vertex shader. Os filetes ficam fora da janela; gotas e escorrimentos são
+recortados no vidro e ocluídos pelas molduras. Não há simulação por gota na
+CPU, cópia da imagem nem novo passe de refração.
+
+`dist/audio/room-audio.js` gera os buffers uma vez, após interação do usuário,
+e mantém duas fontes contínuas mais até quatro efeitos curtos. A espacialização
+acompanha a câmera, o áudio respeita mute/foco/pausa e a medição de sinal só
+aloca um analisador temporário quando solicitada pelo diagnóstico.
+
 `dist/bedroom/bed.js` gera os tecidos em metros: costuras, abas dos travesseiros,
 dobras de tensão, bainhas e a borda retornada do edredom. A densidade da malha
 é concentrada onde muda o contorno. Não há simulação de tecido por quadro.

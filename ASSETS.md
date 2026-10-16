@@ -17,3 +17,12 @@ Diffuse maps use sRGB. Normal and roughness maps use linear data. Painted archit
 ## Iluminação de ambiente
 
 O HDRI `assets/moonlit_room_1k.hdr` vem de [Rogland Moonlit Night, Poly Haven](https://polyhaven.com/a/rogland_moonlit_night), sob CC0. O arquivo equiretangular de 1k é incluído localmente e alimenta tanto o ambiente físico quanto a vista pela janela. A renderização não solicita a API do Poly Haven durante o uso.
+
+## Chuva e áudio da versão 0.8.0
+
+A chuva e as gotas no vidro são desenhadas por geometria instanciada e
+shaders próprios em `dist/weather/rain.js`. Não usam fotografias, vídeos ou
+sprites externos. Os sons de chuva, pingos e falhas elétricas são sintetizados
+localmente por `dist/audio/room-audio.js`, com ruído determinístico, osciladores
+e envelopes. Não há gravações de terceiros, downloads de áudio ou requisições
+de rede durante a reprodução.

@@ -4,7 +4,13 @@ Um único quarto 3D de terror psicológico, explorado exclusivamente em primeira
 
 [Baixar a versão Windows](https://github.com/Gabriell12321/OCO/releases/latest). Extraia o ZIP completo e abra `Quarto 01.exe`.
 
-A versão 0.7.0 refaz os tecidos da cama: travesseiros com painéis e abas
+A versão **0.8.0** acrescenta chuva do lado de fora, gotas e escorrimentos no
+vidro, luz fria da janela refinada e falhas ocasionais do abajur com som
+sincronizado. Clique no quarto para ativar o áudio; o botão de som permite
+silenciar. As mudanças e os limites de custo estão descritos em
+[ATUALIZACAO-0.8.0.md](ATUALIZACAO-0.8.0.md).
+
+A cama mantém os tecidos refeitos na versão 0.7.0: travesseiros com painéis e abas
 costuradas, dobras de tensão no edredom, borda retornada com espessura e manta
 apoiada sobre o caimento. A geometria dos tecidos passa de 90.000 para 34.934
 triângulos. O algodão usa mapas filtrados, escala real e rugosidade compartilhada
