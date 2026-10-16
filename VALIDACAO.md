@@ -1,4 +1,46 @@
-# Validação da versão 0.6.0
+# Validação da versão 0.6.1
+
+Teste no aplicativo Windows, Intel Iris Xe (D3D11/ANGLE), com resolução interna
+de 1004 × 516 no perfil Desempenho. O percurso de aproximadamente 35 segundos,
+após aquecimento, incluiu caminhada, corrida e rotação da câmera pelo controle
+real do jogo. Durante os 25 segundos de movimento:
+
+| Medida | Resultado |
+| --- | ---: |
+| FPS renderizados | 59,38 |
+| Tempo de quadro médio | 16,85 ms |
+| Tempo de quadro p95 | 16,9 ms |
+| Tempo de quadro p99 | 33,0 ms |
+| CPU média | 2,72 ms |
+
+A amostra final de 120 tempos de GPU marcou média de 11,20 ms e p95 de
+16,78 ms. Houve quedas pontuais de quadros; a medição não representa 60 FPS
+constantes nem garante o mesmo resultado em outras máquinas.
+
+Capturas nativas com a mesma câmera confirmaram a cabeça sem abertura. Nos
+três lados testados da cama, ligar/desligar a sombra humana produziu imagens
+idênticas, como esperado para superfícies entre a luz e o jogador. Na parede,
+a sombra escureceu 203.587 pixels sem clarear nenhum. O deslocamento junto à
+cama percorreu 0,901 metro, com diferença máxima de 1,83 cm entre a posição do
+jogador e a última atualização da sombra; o retorno à parede também passou.
+Nenhuma partícula foi desenhada e nenhum erro foi registrado no teste nativo.
+
+Regressões específicas corrigidas e verificadas:
+
+- Cabeça selada: 82.110 raios em 42 direções e 17 poses sem vazamentos. A
+  contraprova com a cabeça anterior detecta 171 passagens de luz indevidas.
+- Profundidade do mapa humano gravada e lida em RGBA. Doze verificações
+  confirmam iluminação antes do corpo e sombra depois dele, em relação à luz.
+- 360 amostras sobre a cama permanecem iluminadas quando o jogador está além
+  dela. O formato antigo produz 12 sombras impossíveis nesse mesmo teste.
+- A projeção anterior desaparece ao deslocar o jogador. Mapa de 512 × 512,
+  uma chamada de desenho e teto de 30 atualizações por segundo preservados.
+- Malha com 6.164 triângulos; 180 poses aprovadas, com pés apoiados no piso.
+- Sistema de partículas removido do carregamento e da atualização por quadro.
+- Geometria do quarto, arquivos locais, caminhada, corrida, colisões, mouse e
+  primeira pessoa aprovados pela suíte de testes.
+
+## Referência da versão 0.6.0
 
 Teste no aplicativo Windows, Intel Iris Xe (D3D11/ANGLE), com resolução interna
 de 1004 × 516 no perfil Desempenho. Cada execução mediu aproximadamente

@@ -138,7 +138,7 @@ async function runRendererBenchmark(requestedQuality) {
   const frameCount = phases.reduce((sum, phase) => sum + phase.frames, 0);
   const aggregate = statistics(allFrames, allCPU, durationMs, frameCount);
   return {
-    version: '0.6.0', test: '35-second-walk-look-run',
+    version: room.version, test: '35-second-walk-look-run',
     renderedAverageFPS: aggregate.renderedFPS, aggregate,
     moving: statistics(movingFrames, movingCPU, movingTime, movingCount),
     idle: phases.find(phase => phase.id === 'idle'), phases,

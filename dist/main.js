@@ -15,7 +15,6 @@ const progress = document.getElementById('loadingProgress');
 const label = document.getElementById('loadingText');
 const qualityButton = document.getElementById('qualityBtn');
 const qualityStatus = document.getElementById('qualityStatus');
-const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const monitor = new PerformanceMonitor();
 let renderer, controls, room, scene, camera, frameHandle = 0;
 let playerShadow, gpuTimer;
@@ -25,7 +24,7 @@ const useFXAA = diagnosticQuery.get('fxaa') !== '0';
 let quality = 'performance', ready = false, desktopPaused = false;
 let adaptiveScale = 1, lowWindows = 0, highWindows = 0;
 let previousTick = 0, previousRender = 0, accumulator = 0, elapsed = 0;
-let animationAccumulator = 0, nextAdaptation = 0;
+let nextAdaptation = 0;
 const shadowLights = [];
 const lightingProfiles = { full: [], efficient: [] };
 const surfaceProfiles = new Map();
@@ -187,26 +186,6 @@ function addLighting() {
   coolBounce.position.set(1.1, 1.9, -.3); scene.add(coolBounce);
 }
 
-function dust() {
-  const count = 32, positions = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) {
-    positions[i * 3] = Math.sin(i * 127.1) * 2.7;
-    positions[i * 3 + 1] = .2 + ((i * 47) % 97) / 97 * 2.5;
-    positions[i * 3 + 2] = Math.cos(i * 311.7) * 2.7;
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const points = new THREE.Points(geometry, new THREE.PointsMaterial({
-    color: 0xcbd1c4, size: .008, transparent: true, opacity: .16, depthWrite: false, sizeAttenuation: true,
-  }));
-  scene.add(points);
-  return time => {
-    if (reducedMotion) return;
-    for (let i = 0; i < count; i++) positions[i * 3 + 1] = .25 + (((i * 47) % 97) / 97 * 2.5 + time * .008) % 2.5;
-    geometry.attributes.position.needsUpdate = true;
-  };
-}
-
 function resizeDrawingBuffer() {
   if (!renderer || !camera) return;
   const { width, height } = drawingSize(innerWidth, innerHeight, devicePixelRatio, quality, adaptiveScale);
@@ -288,7 +267,7 @@ function getPerformanceSnapshot() {
   const stats = monitor.snapshot();
   const width = renderer?.domElement.width || 0, height = renderer?.domElement.height || 0;
   return {
-    ...stats, version: '0.6.0', ready, quality, qualityLabel: PROFILES[quality].label,
+    ...stats, version: '0.6.1', ready, quality, qualityLabel: PROFILES[quality].label,
     character: false, firstPersonOnly: true,
     renderer: 'WebGL2', pathTracing: false, postprocessing: Boolean(qualityTarget), shadows: 'cached',
     gpuRenderer, gpuVendor, msaaSamples: qualityTarget ? qualityTarget.samples : msaaSamples,
@@ -338,7 +317,7 @@ function updateDiagnostics(now) {
 
 function pause() {
   desktopPaused = true; cancelAnimationFrame(frameHandle); frameHandle = 0;
-  monitor.suspend(); previousTick = previousRender = accumulator = animationAccumulator = 0;
+  monitor.suspend(); previousTick = previousRender = accumulator = 0;
 }
 
 function resume() {
@@ -346,7 +325,6 @@ function resume() {
   if (ready && !document.hidden && !frameHandle) frameHandle = requestAnimationFrame(frame);
 }
 
-let updateDust = () => {};
 function frame(now) {
   frameHandle = 0;
   if (document.hidden || desktopPaused) return;
@@ -361,10 +339,7 @@ function frame(now) {
   const start = performance.now();
   gpuTimer.poll(); gpuTimer.begin();
   renderer.info.reset();
-  controls.update(dt); animationAccumulator += dt;
-  if (animationAccumulator >= 1 / 30) {
-    updateDust(elapsed); animationAccumulator = 0;
-  }
+  controls.update(dt);
   for (const update of room.updates || []) update(elapsed, dt);
   playerShadow.update(controls, dt, now);
   renderRoom();
@@ -373,7 +348,7 @@ function frame(now) {
 }
 
 window.Quarto01 = {
-  version: '0.6.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
+  version: '0.6.1', renderer: 'WebGL2', character: false, firstPersonOnly: true,
   get ready() { return ready; }, get quality() { return quality; }, get fps() { return monitor.fps; },
   get frameTimes() { return monitor.frameTimes.slice(); },
   get renderStats() { return renderer ? { ...renderer.info.render } : {}; },
@@ -392,6 +367,9 @@ function setDiagnosticView(id) {
     feet: { position: [.7, -.8], yaw: -2.975, pitch: -1.38 },
     'feet-oblique': { position: [.7, -.8], yaw: -2.475, pitch: -1.38 },
     blanket: { position: [.85, .3], yaw: .77, pitch: -.4 },
+    'bed-right': { position: [.85, .3], yaw: .77, pitch: -.4 },
+    'bed-foot': { position: [-.4, .3], yaw: .2, pitch: -.4 },
+    'bed-left': { position: [-2.4, -1.25], yaw: -1.344, pitch: -.52 },
   };
   if (!poses[id] || !controls.setDiagnosticPose(poses[id])) return false;
   playerShadow?.update(controls, 0, performance.now(), true);
@@ -434,7 +412,6 @@ async function init() {
   playerShadow = createPlayerShadow(renderer, room.lampPosition);
   registerSurfaceProfiles(); applyLightingProfile();
   controls = createControls(camera, canvas, room.colliders);
-  updateDust = dust();
   scene.updateMatrixWorld(true);
   // This room's meshes, lamps and furniture never change transform. Walking
   // only updates the independent camera and shadow proxy, avoiding hundreds of
@@ -452,7 +429,7 @@ async function init() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       cancelAnimationFrame(frameHandle); frameHandle = 0; monitor.suspend();
-      previousTick = previousRender = accumulator = animationAccumulator = 0;
+      previousTick = previousRender = accumulator = 0;
     } else if (!desktopPaused && !frameHandle) frameHandle = requestAnimationFrame(frame);
   });
   window.addEventListener('quarto:pause', pause); window.addEventListener('quarto:resume', resume);

@@ -139,6 +139,14 @@ float getPointShadow(sampler2D shadowMap, vec2 shadowMapSize, float shadowIntens
  */
 export function createPlayerShadow(renderer, lampPosition) {
   const proxy = createHumanShadowProxy(), casterScene = new THREE.Scene();
+  // ObjectLoader does not restore MeshDepthMaterial.depthPacking from JSON.
+  // BasicDepthPacking writes 1-z in grey; the receivers unpack RGBA depth.
+  // Mixing those formats makes a distant human shadow surfaces in front of it
+  // (the blanket beside the player). Keep the depth contract explicit here.
+  proxy.mesh.material.depthPacking = THREE.RGBADepthPacking;
+  proxy.mesh.material.blending = THREE.NoBlending;
+  proxy.mesh.material.toneMapped = false;
+  proxy.mesh.material.needsUpdate = true;
   casterScene.add(proxy.object);
   const shadowCamera = new THREE.PerspectiveCamera(45, 1, .075, 14);
   shadowCamera.position.copy(lampPosition);

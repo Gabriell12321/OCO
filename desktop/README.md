@@ -1,6 +1,6 @@
 # Quarto 01 para Windows
 
-Versão 0.6.0, exclusivamente em primeira pessoa. Empacotamento portátil com
+Versão 0.6.1, exclusivamente em primeira pessoa. Empacotamento portátil com
 Electron oficial 44.7.2 para Windows x64. O usuário
 abre `Quarto 01.exe`; Node, navegador, instalação e internet não são necessários.
 
@@ -58,7 +58,10 @@ Essas opções são comparações técnicas; a execução normal usa FXAA nos tr
 amostra de 3 segundos já estabilizada, depois verifica a volta a DESEMPENHO.
 `--smoke-profile-cycle` valida a troca dos três perfis e o retorno a DESEMPENHO.
 `--capture-views-only` compara a sombra ligada e desligada na mesma câmera,
-depois captura o quarto, o cobertor e os pés nas vistas frontal e oblíqua.
+na parede e nos três lados da cama. O teste também anda para frente e para
+trás ao lado da cama, mede a distância entre jogador e projeção, retorna à
+parede e captura o quarto, o cobertor e os pés nas vistas frontal e oblíqua.
+Essas comparações também acompanham o benchmark de 35 segundos.
 
 Se o shell de desenvolvimento herdou `ELECTRON_RUN_AS_NODE=1`, remova essa
 variável apenas do processo que iniciará o teste. O atalho `ABRIR QUARTO.cmd`

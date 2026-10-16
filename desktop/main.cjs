@@ -149,21 +149,11 @@ async function captureDiagnosticView(win, view) {
   return { view, filename, snapshot };
 }
 
-async function runShadowCapture(win) {
-  try {
-    await win.webContents.executeJavaScript(`(async () => {
-      const deadline = performance.now() + 90000;
-      while (!window.Quarto01?.ready || !document.body.classList.contains('ready')) {
-        if (performance.now() > deadline) throw new Error('O quarto não terminou de carregar.');
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-      if (typeof window.Quarto01.setDiagnosticShadowEnabled !== 'function') throw new Error('Toggle de sombra de diagnóstico ausente.');
-      // Let Chromium present the removal of the loading overlay before the
-      // first comparison. Capturing its stale compositor layer biases the diff.
-      await new Promise(resolve => setTimeout(resolve, 2500));
-      window.Quarto01.setDiagnosticView('shadow');
-    })()`);
-    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+async function captureShadowRegression(win) {
+  fs.mkdirSync(RESULTS_DIR, { recursive: true });
+  const comparisons = [];
+  for (const view of ['shadow', 'bed-right', 'bed-foot', 'bed-left']) {
+    await captureDiagnosticView(win, view);
     const captures = [], images = [];
     for (const enabled of [true, false]) {
       const snapshot = await win.webContents.executeJavaScript(`(async () => {
@@ -180,7 +170,7 @@ async function runShadowCapture(win) {
           loadingVisible: !document.getElementById('loading').classList.contains('hidden') };
       })()`);
       const image = await win.webContents.capturePage();
-      const filename = path.join(RESULTS_DIR, enabled ? 'shadow-on.png' : 'shadow-off.png');
+      const filename = path.join(RESULTS_DIR, view + (enabled ? '-on.png' : '-off.png'));
       fs.writeFileSync(filename, image.toPNG()); images.push(image);
       captures.push({ enabled, filename, snapshot });
     }
@@ -200,12 +190,72 @@ async function runShadowCapture(win) {
       JSON.stringify(captures[0].snapshot.cameraQuaternion) === JSON.stringify(captures[1].snapshot.cameraQuaternion);
     const difference = { cameraUnchanged, comparedPixels: pixels, darkenedPixels, brightenedPixels,
       meanAbsoluteChannelDelta: Math.round(deltaSum * 1000 / Math.max(1, pixels * 3)) / 1000 };
+    const projectionFollows = captures.every(({ snapshot }) => {
+      const player = snapshot.playerPosition, shadow = snapshot.playerShadow.position;
+      return Math.hypot(player.x - shadow.x, player.z - shadow.z) < .02;
+    });
+    const noParticles = captures.every(({ snapshot }) => snapshot.renderStats?.points === 0);
     const passed = captures[0].snapshot.playerShadow.active && !captures[1].snapshot.playerShadow.active &&
-      captures.every(capture => !capture.snapshot.loadingVisible) &&
-      cameraUnchanged && darkenedPixels - brightenedPixels > 500 && !ERRORS.some(error => error.kind !== 'console-warning');
+      captures.every(capture => !capture.snapshot.loadingVisible) && cameraUnchanged && projectionFollows && noParticles &&
+      (view !== 'shadow' || darkenedPixels - brightenedPixels > 500);
+    comparisons.push({ view, passed, projectionFollows, noParticles, captures, difference });
+  }
+  // Exercise the real movement controller near the bed, then return to the
+  // original wall pose. These images also catch stale maps after relocating.
+  const movementStart = await captureDiagnosticView(win, 'bed-right');
+  const movement = await win.webContents.executeJavaScript(`(async () => {
+    const room = window.Quarto01, samples = [];
+    const sample = () => {
+      const s = room.getPerformanceSnapshot();
+      samples.push({ player: s.playerPosition, shadow: s.playerShadow.position,
+        updates: s.playerShadow.updates, active: s.playerShadow.active, moving: s.moving });
+    };
+    const key = (type, code) => document.dispatchEvent(new KeyboardEvent(type,
+      { code, key: code === 'KeyW' ? 'w' : 's', bubbles: true }));
+    for (const code of ['KeyW', 'KeyS']) {
+      key('keydown', code);
+      try {
+        for (let i = 0; i < 6; i++) {
+          await new Promise(resolve => setTimeout(resolve, 150)); sample();
+        }
+      } finally { key('keyup', code); }
+      await new Promise(resolve => setTimeout(resolve, 250)); sample();
+    }
+    return samples;
+  })()`);
+  const movementEndFile = path.join(RESULTS_DIR, 'bed-right-after-walk.png');
+  fs.writeFileSync(movementEndFile, (await win.webContents.capturePage()).toPNG());
+  const returnedWall = await captureDiagnosticView(win, 'shadow');
+  const movedDistance = Math.max(...movement.map(sample => Math.hypot(
+    sample.player.x - movementStart.snapshot.playerPosition.x,
+    sample.player.z - movementStart.snapshot.playerPosition.z)));
+  const maximumShadowLag = Math.max(...movement.map(sample => Math.hypot(
+    sample.player.x - sample.shadow.x, sample.player.z - sample.shadow.z)));
+  const movementPassed = movedDistance > .15 && maximumShadowLag < .15 &&
+    movement.some(sample => sample.moving) && movement.every(sample => sample.active) &&
+    movementStart.snapshot.playerShadow.active && returnedWall.snapshot.playerShadow.active &&
+    returnedWall.snapshot.playerShadow.updates > movementStart.snapshot.playerShadow.updates;
+  return { success: comparisons.every(result => result.passed) && movementPassed,
+    comparisons, movement: { passed: movementPassed, movedDistance, maximumShadowLag,
+      samples: movement, start: movementStart, endFilename: movementEndFile, returnedWall } };
+}
+
+async function runShadowCapture(win) {
+  try {
+    await win.webContents.executeJavaScript(`(async () => {
+      const deadline = performance.now() + 90000;
+      while (!window.Quarto01?.ready || !document.body.classList.contains('ready')) {
+        if (performance.now() > deadline) throw new Error('O quarto não terminou de carregar.');
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      if (typeof window.Quarto01.setDiagnosticShadowEnabled !== 'function') throw new Error('Toggle de sombra de diagnóstico ausente.');
+      await new Promise(resolve => setTimeout(resolve, 2500));
+    })()`);
+    const regression = await captureShadowRegression(win);
     const detailCaptures = [];
     for (const view of ['initial', 'blanket', 'feet', 'feet-oblique']) detailCaptures.push(await captureDiagnosticView(win, view));
-    writeResult({ success: passed, test: 'shadow-on-off-same-camera', captures, detailCaptures, difference, errors: ERRORS });
+    const passed = regression.success && !ERRORS.some(error => error.kind !== 'console-warning');
+    writeResult({ success: passed, test: 'shadow-wall-bed-and-movement', regression, detailCaptures, errors: ERRORS });
     app.exit(passed ? 0 : 1);
   } catch (error) {
     writeResult({ success: false, test: 'shadow-on-off-same-camera', message: String(error), errors: ERRORS });
@@ -224,8 +274,9 @@ async function runBenchmark(win) {
     fs.writeFileSync(screenshotPath, image.toPNG());
     const captures = [];
     for (const view of ['shadow', 'blanket', 'feet']) captures.push(await captureDiagnosticView(win, view));
+    const shadowRegression = await captureShadowRegression(win);
     const passed = firstPersonInspection.passed && metrics.movementVerified && metrics.turningVerified &&
-      metrics.runningVerified && metrics.gaitVerified && metrics.shadowMovementVerified &&
+      metrics.runningVerified && metrics.gaitVerified && metrics.shadowMovementVerified && shadowRegression.success &&
       metrics.renderer.version === app.getVersion() &&
       metrics.startSnapshot.view === 'first-person' && metrics.renderer.view === 'first-person' &&
       !metrics.errorVisible && !metrics.loadingVisible &&
@@ -233,7 +284,7 @@ async function runBenchmark(win) {
       !ERRORS.some(error => error.kind !== 'console-warning');
     writeResult({ success: passed, date: new Date().toISOString(), electron: process.versions.electron,
       chromium: process.versions.chrome, gpuFeatureStatus: app.getGPUFeatureStatus(), gpu,
-      metrics, firstPersonInspection, screenshotPath, captures, rendererReport: latestRendererReport, errors: ERRORS });
+      metrics, firstPersonInspection, screenshotPath, captures, shadowRegression, rendererReport: latestRendererReport, errors: ERRORS });
     app.exit(passed ? 0 : 1);
   } catch (error) {
     writeResult({ success: false, date: new Date().toISOString(), message: String(error), errors: ERRORS });

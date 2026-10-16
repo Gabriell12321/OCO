@@ -33,6 +33,13 @@ e o solado foram arredondados, com calcanhar mais estreito; os vértices do
 contorno dos dedos são preservados na simplificação. A altura
 em repouso é de 1,76 metro.
 
+O rosto e o couro cabeludo originais têm cavidades abertas que deixavam passar
+luz pela cabeça em certos ângulos. Um interior fechado, derivado do próprio
+contorno anatômico e recuado sob a superfície, sela essas cavidades. Seus 166
+triângulos usam o mesmo osso da cabeça e a mesma malha, totalizando 6.164
+triângulos, sem chamada de desenho adicional. O rosto, o cabelo e o contorno
+externo continuam sendo os do personagem.
+
 O repouso usa uma postura neutra entre duas fases opostas da caminhada, com
 os braços relaxados. A caminhada e a corrida misturam curvas de movimento;
 a fase acompanha a distância efetivamente percorrida, incluindo marcha à ré.
@@ -48,3 +55,15 @@ modelo ou textura de personagem é adicionado à renderização principal.
 contato dos pés, deformação em diferentes fases e o limite de atualização do
 mapa. Os originais e o processo de conversão local ficam em `.setup/`, fora da
 distribuição; o arquivo de dados final está versionado com este jogo.
+
+`tests/head-shadow.mjs` verifica o fechamento e a orientação de cada aresta do
+interior da cabeça, além da oclusão de 82.110 raios em 42 direções e 17 poses.
+As amostras incluem luz de baixo, de frente, dos lados e de trás; uma
+contraprova com as faces anteriores confirma que o teste encontra o vazamento
+que motivou a correção.
+
+O mapa grava profundidade RGBA explicitamente, no mesmo formato lido pelo
+shader das superfícies. `tests/shadow-projection.mjs` verifica superfícies
+antes e depois do jogador em relação à lâmpada, 360 pontos sobre a cama e a
+remoção da sombra da posição anterior durante o deslocamento. As capturas
+nativas com sombra ligada/desligada completam a validação do renderizador.

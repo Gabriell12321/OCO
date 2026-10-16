@@ -4,6 +4,10 @@ Um único quarto 3D de terror psicológico, explorado exclusivamente em primeira
 
 [Baixar a versão Windows](https://github.com/Gabriell12321/OCO/releases/latest). Extraia o ZIP completo e abra `Quarto 01.exe`.
 
+A versão 0.6.1 fecha as aberturas da cabeça na sombra, corrige as projeções
+indevidas sobre a cama e remove a poeira flutuante. A sombra respeita a distância
+entre a lâmpada, o jogador e cada superfície, e acompanha o deslocamento pelo quarto.
+
 Versão Windows portátil: abra `Windows/Quarto 01/Quarto 01.exe`, na pasta acima deste projeto. Extraia o ZIP inteiro antes de abrir e mantenha o executável junto das demais pastas e arquivos. Node, navegador e conexão à internet não são necessários para usar o programa.
 
 A versão desktop reutiliza as sombras estáticas, controla a resolução interna e limita a apresentação a 60 quadros por segundo. Os perfis **Desempenho**, **Equilibrado** e **Qualidade** permitem trocar a qualidade durante o jogo. O perfil inicial é Desempenho, com resolução adaptativa. O tratamento de cor AgX preserva a transição entre a luz do abajur e as sombras do quarto; FXAA suaviza as bordas depois desse tratamento, sem o custo de MSAA 4×. Veja as medições em [VALIDACAO.md](VALIDACAO.md).
