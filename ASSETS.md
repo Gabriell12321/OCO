@@ -14,6 +14,13 @@ Downloads use the file URLs provided by `https://api.polyhaven.com/files/{asset_
 
 Diffuse maps use sRGB. Normal and roughness maps use linear data. Painted architecture and timber use real-world UV scale so the photographed grain remains consistent on narrow mouldings and furniture panels. The wood's scanned roughness preserves variation in worn varnish. All material detail is rendered on actual room geometry. Runtime texture anisotropy is limited to four. The bundled surface photographs, including the retained earlier 1k versions, total approximately 32.5 MB.
 
+## Cadeira da versão 0.10.0
+
+A cadeira da versão 0.10.0 é modelada em código em
+`dist/bedroom/chair.js`. Seu acabamento reutiliza as fotografias de madeira
+e linho listadas acima, com UVs em metros e ajustes locais de material.
+Nenhum arquivo adicional de textura ou modelo é necessário para a cadeira.
+
 ## Iluminação de ambiente
 
 O HDRI `assets/moonlit_room_1k.hdr` vem de [Rogland Moonlit Night, Poly Haven](https://polyhaven.com/a/rogland_moonlit_night), sob CC0. O arquivo equiretangular de 1k é incluído localmente e alimenta tanto o ambiente físico quanto a vista pela janela. A renderização não solicita a API do Poly Haven durante o uso.

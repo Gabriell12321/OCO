@@ -1,6 +1,6 @@
 # Quarto 01 para Windows
 
-Versão 0.9.0, exclusivamente em primeira pessoa. Empacotamento portátil com
+Versão 0.10.0, exclusivamente em primeira pessoa. Empacotamento portátil com
 Electron oficial 44.7.2 para Windows x64. O usuário
 abre `Quarto 01.exe`; Node, navegador, instalação e internet não são necessários.
 
@@ -80,6 +80,14 @@ oferece essa opção de diagnóstico. O resultado inclui os cinco PNGs.
 modos de material/sombra, mantendo a câmera imóvel para investigar artefatos.
 `--capture-bed-base` captura somente o resultado normal nos três lados da cama
 e na parede com a sombra do jogador.
+
+`--benchmark-chair` mede três vistas estáticas da cadeira por 4 segundos cada:
+costas, frente em três quartos e assento de perto. A resolução permanece fixa,
+a iluminação fica congelada e chuva/clarão ficam desligados. As três capturas
+usam poses exatas para comparar modelagem e materiais entre versões, junto
+de FPS, tempos de quadro, CPU/GPU e estatísticas da cena.
+Ao final, captura frente e assento em QUALIDADE para inspecionar tecido,
+costura e madeira, retornando a DESEMPENHO. Essas duas vistas não medem FPS.
 
 `--benchmark-weather` mede duas vistas da janela, cada uma por 4 segundos com
 chuva desligada e ligada, na mesma resolução fixa. Captura os pares, a lâmpada

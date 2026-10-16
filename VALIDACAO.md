@@ -1,4 +1,80 @@
-# Validação da versão 0.9.0
+# Validação da versão 0.10.0
+
+O foco desta versão é a cadeira da escrivaninha. A comparação usa o
+aplicativo 0.9.0 preservado antes da alteração, com três poses diagnósticas
+adicionadas à cópia local: costas, frente oblíqua e assento de perto.
+O quarto, os materiais e o renderizador antigos permanecem nessa referência.
+
+A máquina de teste usa Intel Iris Xe (D3D11/ANGLE), janela de 1900 × 977,
+perfil Desempenho com FXAA e imagem interna fixa de 1004 × 516. Cada vista
+é medida por quatro segundos após aquecimento. Câmera, resolução e atmosfera
+são conferidas entre versões: relógio congelado, abajur aceso, clarão
+vermelho e chuva visual desligados. Fases com perda de foco, pausa ou
+cobertura temporal inválida são rejeitadas.
+
+## Geometria e materiais
+
+A cadeira antiga tinha 3.680 triângulos, 10.928 vértices e 14 malhas antes
+dos lotes da cena. A nova tem 11.628 triângulos, 7.057 vértices e quatro
+malhas, com quatro materiais. Os vértices são reutilizados pelos índices;
+o aumento de triângulos concentra detalhe nas curvas e no estofado.
+Não se presume que reduzir vértices torne a cena mais rápida: a avaliação
+de custo usa medições nativas.
+
+Os testes verificam coordenadas/normais finitas, índices, dimensões,
+UVs em metros, direção da fibra, faces visíveis do lado correto e contato
+dos quatro pés. A base do estofado encontra as travessas com diferença
+entre −1,5 e +0,5 mm. A colisão usa a caixa do modelo transformado.
+Os materiais compartilham as fotografias já incluídas; não há luz,
+textura adicional ou simulação por quadro para a cadeira.
+
+## Resultados nativos
+
+| Vista | FPS 0.9.0 | FPS 0.10.0 | Quadro p95 antes/depois | GPU antes/depois |
+| --- | ---: | ---: | ---: | ---: |
+| Costas | 60,01 | 60,05 | 16,9 / 16,8 ms | 7,44 / 8,06 ms |
+| Frente oblíqua | 60,01 | 59,98 | 16,8 / 16,8 ms | 11,05 / 11,94 ms |
+| Assento | 60,20 | 60,06 | 16,9 / 16,8 ms | 7,66 / 8,04 ms |
+
+As três vistas mantiveram câmera, resolução e atmosfera idênticas, com
+cobertura temporal válida, sem repetições, erros ou avisos. A cena ganhou
+7.948 triângulos visíveis e três draw calls em cada vista. O custo médio de
+GPU aumentou entre 0,38 e 0,89 ms nessas amostras. A taxa permaneceu próxima
+de 60 FPS no perfil testado; amostras curtas limitadas a 60 Hz não demonstram
+ganho de desempenho nem garantem o mesmo resultado em outros computadores.
+
+O percurso de 35,06 segundos inclui caminhada, corrida, rotação do mouse,
+chuva, áudio e um trovão real acompanhado do clarão. Os trechos em movimento
+somam 25,04 segundos. Ambos os conjuntos tiveram 60,02 FPS, quadro médio
+de 16,67 ms, p95 de 16,9 ms e p99 de 17,0 ms. A CPU média foi de 3,53 ms
+no percurso completo e 3,62 ms em movimento. Caminhada, corrida, rotação,
+animação do corpo e deslocamento da sombra foram confirmados. Nenhuma fase
+foi interrompida ou repetida.
+
+A regressão de sombra ON/OFF passou. No teste de deslocamento, a sombra
+acompanhou 0,901 m de movimento, com defasagem máxima de 0,0186 m.
+O teste funcional Desempenho → Equilibrado → Qualidade → Desempenho também
+passou, sem erros ou avisos; ele verifica as transições e não mede FPS
+estabilizado dos três perfis.
+
+As treze verificações locais passaram. Após o último refinamento do
+estofado, a verificação geral e o teste específico da cadeira foram
+reexecutados com sucesso. A revisão independente do código e das capturas
+finais aprovou o encosto, os pés, o contato do assento e as costuras, sem
+vãos ou artefatos novos. O tecido ganhou variação discreta; os vincos são
+sutis nessa distância e iluminação. As capturas adicionais de Qualidade
+servem à revisão visual, não à comparação de FPS acima.
+
+Evidências locais, geradas pelo aplicativo e mantidas fora do Git:
+
+- `desktop/results/v0.9.0-chair-baseline/`: aplicativo anterior preservado.
+- `desktop/results/v0.10.0-chair-final/`: três vistas, capturas em Qualidade
+  e `comparison-v0.9.0.json` com a comparação de câmera e desempenho.
+- `desktop/results/v0.10.0-movement-final/`: percurso de 35 segundos,
+  carga real de áudio/tempestade e regressão da sombra.
+- `desktop/results/v0.10.0-smoke-final/`: troca dos perfis gráficos.
+
+## Referência da versão 0.9.0
 
 Aplicativo Windows na Intel Iris Xe (D3D11/ANGLE), janela de 1900 × 977,
 perfil Desempenho com FXAA e resolução interna fixa de 1004 × 516.

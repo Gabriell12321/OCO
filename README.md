@@ -4,12 +4,14 @@ Um único quarto 3D de terror psicológico, explorado exclusivamente em primeira
 
 [Baixar a versão Windows](https://github.com/Gabriell12321/OCO/releases/latest). Extraia o ZIP completo e abra `Quarto 01.exe`.
 
-A versão **0.9.0** troca a base sonora da chuva por uma gravação natural e
-acrescenta trovões acompanhados de um clarão vermelho entrando pela janela.
-O clarão ilumina os materiais do quarto e aparece nos reflexos da água.
-Chuva externa, gotas no vidro e falhas do abajur continuam presentes.
-Clique no quarto para ativar o áudio; o botão de som permite silenciar.
-As mudanças estão em [ATUALIZACAO-0.9.0.md](ATUALIZACAO-0.9.0.md).
+A versão **0.10.0** refaz a cadeira da escrivaninha: pernas afiladas,
+encosto curvo, encaixes de madeira e assento estofado com costura.
+Os materiais usam veios orientados por peça e trama de tecido em escala
+real. As mudanças estão em [ATUALIZACAO-0.10.0.md](ATUALIZACAO-0.10.0.md).
+
+A chuva natural e os trovões com clarão vermelho pela janela continuam
+presentes, junto das gotas no vidro e falhas do abajur. Clique no quarto
+para ativar o áudio; o botão de som permite silenciar.
 
 A cama mantém os tecidos refeitos na versão 0.7.0: travesseiros com painéis e abas
 costuradas, dobras de tensão no edredom, borda retornada com espessura e manta

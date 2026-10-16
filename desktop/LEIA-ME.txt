@@ -1,4 +1,4 @@
-QUARTO 01 — WINDOWS 64 BITS — VERSÃO 0.9.0
+QUARTO 01 — WINDOWS 64 BITS — VERSÃO 0.10.0
 
 1. Extraia a pasta inteira se estiver abrindo o arquivo ZIP.
 2. Abra "Quarto 01.exe" dentro da pasta "Quarto 01".
@@ -22,6 +22,7 @@ Este é um aplicativo independente para Windows com um quarto realista,
 explorado exclusivamente em primeira pessoa. A sombra usa uma malha humana,
 com pés anatômicos e uma passada ligada à distância realmente percorrida.
 A caminhada tem aceleração gradual, frenagem e movimento discreto da câmera.
+A cadeira recebeu modelagem mais detalhada e materiais próprios.
 Há chuva do lado de fora e gotas escorrendo na janela. A iluminação muda
 durante os lampejos da lâmpada, acompanhados por estalos e ruído elétrico.
 O som da chuva acompanha a tempestade, com trovões e clarões vermelhos

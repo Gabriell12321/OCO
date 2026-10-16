@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createBedding } from './bedroom/bed.js';
+import { createChair } from './bedroom/chair.js';
 
 // A quiet, occupied bedroom. All measurements are in metres.
 export function createRoom(scene, materials) {
@@ -381,21 +382,37 @@ export function createRoom(scene, materials) {
   cylinder(.042, .033, .083, .48, .851, .13, cupMat, 32, desk);
   cylinder(.036, .031, .006, .48, .895, .13, plain('#382a1d', .25), 32, desk);
   const mugHandle = mesh(new THREE.TorusGeometry(.027, .008, 10, 22), cupMat, .535, .852, .13, desk); mugHandle.rotation.y = Math.PI / 2;
-  const chair = new THREE.Group(); chair.position.set(1.42, 0, -.62); chair.rotation.y = -Math.PI / 2 + .09; room.add(chair);
-  block(1.42, -.62, .52, .56, .04); contact(1.42, -.62, .77, .8, .2);
-  box(.46, .055, .44, 0, .455, 0, M.wood, .022, chair);
+  // Shaped joinery and a sewn cushion replace the old box-and-stick chair.
+  // Its materials share existing photographs and remain local to this prop.
+  const chairWood = cloneSurface(M.wood);
+  chairWood.name = 'Hand-worn walnut chair'; chairWood.color.set('#d7c3a2');
+  chairWood.roughness = .82; chairWood.normalScale.set(.075, .075);
+  chairWood.envMapIntensity = .42; chairWood.vertexColors = true;
   const chairFabric = cloneSurface(M.blanket);
-  chairFabric.name = 'Faded olive woven seat cushion'; chairFabric.color.set('#8e8b74');
-  chairFabric.normalScale.set(.20, .20); chairFabric.roughness = 1;
-  box(.418, .048, .397, 0, .494, 0, chairFabric, .035, chair);
-  for (const x of [-.18, .18]) for (const z of [-.16, .16]) {
-    const leg = box(.036, .43, .036, x, .233, z, M.wood, .007, chair); leg.rotation.z = x * -.18;
+  chairFabric.name = 'Faded sage upholstery'; chairFabric.color.set('#9b9b83');
+  chairFabric.normalScale.set(.22, .22); chairFabric.roughness = .98;
+  chairFabric.side = THREE.FrontSide; chairFabric.vertexColors = true;
+  if (chairFabric.isMeshPhysicalMaterial) {
+    chairFabric.sheen = .22; chairFabric.sheenColor.set('#b8b59b'); chairFabric.sheenRoughness = .94;
   }
-  for (const x of [-.195, .195]) box(.035, .59, .035, x, .729, .189, M.wood, .007, chair);
-  box(.43, .115, .04, 0, .991, .189, M.wood, .012, chair);
-  for (const x of [-.09, 0, .09]) box(.025, .33, .025, x, .779, .19, M.wood, .006, chair);
-  rod(point(-.19, .22, -.17), point(-.19, .22, .17), .011, M.wood, chair);
-  rod(point(.19, .22, -.17), point(.19, .22, .17), .011, M.wood, chair);
+  const chairPiping = cloneSurface(chairFabric);
+  chairPiping.name = 'Upholstery seam binding'; chairPiping.color.set('#777b62');
+  const chairDetail = cloneSurface(chairWood);
+  chairDetail.name = 'Walnut joinery plugs'; chairDetail.color.multiplyScalar(.81); chairDetail.roughness = .95;
+  const modeledChair = createChair({ wood: chairWood, fabric: chairFabric, piping: chairPiping, detail: chairDetail });
+  const chair = modeledChair.group;
+  chair.position.set(1.42, 0, -.62); chair.rotation.y = -Math.PI / 2 + .09; room.add(chair);
+  chair.updateMatrixWorld(true);
+  const chairWorldBounds = modeledChair.bounds.clone().applyMatrix4(chair.matrixWorld);
+  const chairSize = chairWorldBounds.getSize(new THREE.Vector3()), chairCenter = chairWorldBounds.getCenter(new THREE.Vector3());
+  block(chairCenter.x, chairCenter.z, chairSize.x, chairSize.z, .035);
+  contact(1.42, -.62, .68, .69, .15, .0025);
+  const { parts: chairParts, ...chairMetrics } = modeledChair.stats;
+  chairMetrics.parts = {};
+  for (const piece of Object.values(chairParts)) {
+    chairMetrics.parts[piece.part] = (chairMetrics.parts[piece.part] || 0) + piece.triangles;
+  }
+  chairMetrics.worldSize = chairSize.toArray();
 
   // Raised-panel bedroom door, carefully scaled hardware and painted architrave.
   const doorX = 1.94;
@@ -432,7 +449,7 @@ export function createRoom(scene, materials) {
   // Faded photographs in layered timber frames. No supernatural props or UI.
   picture(-2.974, 1.72, -1.58, .55, .73, Math.PI / 2, 1);
   picture(2.974, 1.85, 1.47, .62, .46, -Math.PI / 2, 2);
-  return { colliders, bedMetrics, lampPosition: new THREE.Vector3(bedsideX, 1.075, lampZ),
+  return { colliders, bedMetrics, chairMetrics, lampPosition: new THREE.Vector3(bedsideX, 1.075, lampZ),
     lampMaterials: { shade, bulb: filament.material },
     windowPosition: new THREE.Vector3(.4, 1.775, -3.18), windowGlass: glass,
     windowBounds: { position: glass.position.clone(), width: 1.54, height: 1.45 }, updates: [] };

@@ -137,11 +137,11 @@ function getPerformanceSnapshot() {
   const stats = monitor.snapshot();
   const width = renderer?.domElement.width || 0, height = renderer?.domElement.height || 0;
   return {
-    ...stats, version: '0.9.0', ready, quality, qualityLabel: PROFILES[quality].label,
+    ...stats, version: '0.10.0', ready, quality, qualityLabel: PROFILES[quality].label,
     character: false, firstPersonOnly: true,
     renderer: 'WebGL2', pathTracing: false, shadows: 'cached',
     engine: 'OCO', engineBackend: 'Three.js / WebGL2', engineVersion: '0.1',
-    staticScene: staticSceneStats || null, bed: room?.bedMetrics || null,
+    staticScene: staticSceneStats || null, bed: room?.bedMetrics || null, chair: room?.chairMetrics || null,
     atmosphere: { time: atmosphere.time, frozen: atmosphere.frozen, light: lighting?.snapshot() || null,
       rain: rain?.snapshot() || null },
     audio: roomAudio?.snapshot() || null,
@@ -222,7 +222,7 @@ function frame(now) {
 }
 
 window.Quarto01 = {
-  version: '0.9.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
+  version: '0.10.0', renderer: 'WebGL2', character: false, firstPersonOnly: true,
   get ready() { return ready; }, get quality() { return quality; }, get fps() { return monitor.fps; },
   get frameTimes() { return monitor.frameTimes.slice(); },
   get renderStats() { return renderer ? { ...renderer.info.render } : {}; },
@@ -293,6 +293,9 @@ function setDiagnosticView(id) {
     'bed-left': { position: [-2.4, -1.25], yaw: -1.344, pitch: -.52 },
     window: { position: [.85, -.8], yaw: .1835, pitch: .06 },
     'window-close': { position: [1.15, -2.2], yaw: .63, pitch: .12 },
+    'chair-back': { position: [.58, .2], yaw: -.7974457732516342, pitch: -.6855002113881905 },
+    'chair-front': { position: [1.9, .45], yaw: .42168751919690073, pitch: -.685980825044743 },
+    'chair-seat': { position: [1.15, .12], yaw: -.3498556018570981, pitch: -.9578457534154736 },
   };
   if (!poses[id] || !controls.setDiagnosticPose(poses[id])) return false;
   playerShadow?.update(controls, 0, performance.now(), true);

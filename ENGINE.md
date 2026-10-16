@@ -38,6 +38,13 @@ escala em 1, para não atribuir a uma otimização o ganho de uma resolução me
 
 ## Conteúdo e materiais
 
+`dist/bedroom/chair.js` constrói a cadeira com peças curvas, seção afilada,
+encaixes e estofado fechado. Os UVs seguem o comprimento de cada peça de
+madeira e a escala do tecido. A geometria é estática e entra nos lotes
+da cena; a colisão vem dos limites reais do modelo transformado. Não há
+simulação, atualização de geometria por quadro ou luz adicional para ela.
+Os materiais da cadeira compartilham as fotografias já incluídas no quarto.
+
 `dist/engine/room-lighting.js` mantém os emissores fixos e amostra uma sequência
 determinística de falhas elétricas. Um único sinal altera luz direta,
 preenchimento, emissivos e reflexos na água; o evento de início dispara o som.

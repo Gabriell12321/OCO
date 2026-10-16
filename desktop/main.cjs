@@ -18,12 +18,13 @@ const QUALITY_STEADY_PROBE = process.argv.includes('--quality-steady-probe');
 const SMOKE_PROFILE_CYCLE = process.argv.includes('--smoke-profile-cycle') || QUALITY_STEADY_PROBE;
 const CAPTURE_VIEWS_ONLY = process.argv.includes('--capture-views-only');
 const BED_BENCHMARK = process.argv.includes('--benchmark-bed');
+const CHAIR_BENCHMARK = process.argv.includes('--benchmark-chair');
 const BED_SURFACE_BASE_ONLY = process.argv.includes('--capture-bed-base');
 const BED_SURFACES = process.argv.includes('--capture-bed-surfaces') || BED_SURFACE_BASE_ONLY;
 const WEATHER_BENCHMARK = process.argv.includes('--benchmark-weather');
 const AUDIO_PROBE = process.argv.includes('--probe-audio');
 const STORM_BENCHMARK = process.argv.includes('--benchmark-storm') || process.argv.includes('--probe-storm');
-const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY || BED_BENCHMARK || BED_SURFACES || WEATHER_BENCHMARK || AUDIO_PROBE || STORM_BENCHMARK;
+const BENCHMARK = process.argv.includes('--benchmark') || SMOKE_PROFILE_CYCLE || CAPTURE_VIEWS_ONLY || BED_BENCHMARK || BED_SURFACES || WEATHER_BENCHMARK || AUDIO_PROBE || STORM_BENCHMARK || CHAIR_BENCHMARK;
 const requestedQualityArgument = process.argv.find(arg => arg.startsWith('--benchmark-quality='));
 const requestedQuality = requestedQualityArgument?.slice('--benchmark-quality='.length);
 const BENCHMARK_QUALITY = ['performance', 'balanced', 'quality'].includes(requestedQuality) ? requestedQuality : null;
@@ -373,6 +374,53 @@ async function runBedBenchmark(win) {
     app.exit(passed ? 0 : 1);
   } catch (error) {
     writeResult({ success: false, test: 'bed-fixed-resolution-five-views', message: String(error), errors: ERRORS });
+    app.exit(1);
+  }
+}
+
+async function runChairBenchmark(win) {
+  try {
+    const initial = await win.webContents.executeJavaScript(buildBedPrepareScript(BENCHMARK_QUALITY || 'performance'));
+    const atmosphere = { time: 0, frozen: true, rain: false, lamp: 1, thunder: 0 };
+    await win.webContents.executeJavaScript('window.Quarto01.setDiagnosticAtmosphere(' + JSON.stringify(atmosphere) + ')');
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    const views = [], captures = [], qualityCaptures = [];
+    for (const view of ['chair-back', 'chair-front', 'chair-seat']) {
+      const measured = await measureDiagnosticView(win, { id: view, view, duration: 4000, turn: false });
+      const capture = await captureAtmosphereView(win, view, view, atmosphere);
+      const { image: _image, ...record } = capture; captures.push(record);
+      views.push({ ...measured, filename: record.filename });
+    }
+    await win.webContents.executeJavaScript("window.Quarto01.setQuality('quality')");
+    await focusDiagnosticWindow(win);
+    await win.webContents.executeJavaScript(`(async () => {
+      const room = window.Quarto01, firstFrame = room.getPerformanceSnapshot().totalFrames;
+      const deadline = performance.now() + 20000;
+      while (room.getPerformanceSnapshot().totalFrames < firstFrame + 12) {
+        if (performance.now() > deadline) throw new Error('A cadeira em Qualidade não terminou de renderizar.');
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      await new Promise(resolve => setTimeout(resolve, 2500));
+    })()`);
+    for (const view of ['chair-front', 'chair-seat']) {
+      const capture = await captureAtmosphereView(win, view, view + '-quality', atmosphere);
+      const { image: _image, ...record } = capture; qualityCaptures.push(record);
+    }
+    await win.webContents.executeJavaScript("window.Quarto01.setQuality('performance')");
+    const fixedResolution = views.every(view => view.fixedResolution &&
+      view.before.drawingBufferWidth === initial.snapshot.drawingBufferWidth && view.before.drawingBufferHeight === initial.snapshot.drawingBufferHeight);
+    const atmosphereFrozen = views.every(view => view.before.atmosphere.time === 0 && view.after.atmosphere.time === 0 &&
+      view.after.atmosphere.frozen && !view.after.atmosphere.rain.enabled &&
+      view.after.atmosphere.light.lampGain === 1 && view.after.atmosphere.light.thunderGain === 0);
+    const qualityReady = qualityCaptures.every(capture => capture.snapshot.quality === 'quality' && capture.snapshot.ready && !capture.snapshot.paused);
+    const passed = fixedResolution && atmosphereFrozen && qualityReady && views.every(view => view.timingIntegrity.valid &&
+      view.frames > 30 && view.poseVerified && view.after.renderStats.points === 0 &&
+      (!view.gpu.available || view.gpu.samples > 4)) && !ERRORS.some(error => error.kind !== 'console-warning');
+    writeResult({ success: passed, test: 'chair-three-views-fixed-resolution', initial, fixedResolution,
+      atmosphereFrozen, atmosphere, views, captures, qualityCaptures, qualityReady, errors: ERRORS });
+    app.exit(passed ? 0 : 1);
+  } catch (error) {
+    writeResult({ success: false, test: 'chair-three-views-fixed-resolution', message: String(error), errors: ERRORS });
     app.exit(1);
   }
 }
@@ -764,7 +812,8 @@ function createWindow() {
       await win.webContents.executeJavaScript(INSTALL_DIAGNOSTIC_INPUT_GUARD);
       win.setTitle('Quarto 01 — Teste automático');
     }
-    if (STORM_BENCHMARK) runStormBenchmark(win);
+    if (CHAIR_BENCHMARK) runChairBenchmark(win);
+    else if (STORM_BENCHMARK) runStormBenchmark(win);
     else if (AUDIO_PROBE) runAudioProbe(win);
     else if (WEATHER_BENCHMARK) runWeatherBenchmark(win);
     else if (BED_SURFACES) runBedSurfaceCapture(win);
